@@ -1,0 +1,12 @@
+[package]
+name = "kiwi"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+async-trait = "0.1.89"
+eframe = "0.34.2"
+egui = "0.34.2"
+rhai = "1.25.0"
+serde = { version = "1.0.228", features = ["derive"] }
+tokio = { version = "1.52.3", features = ["full"] }
