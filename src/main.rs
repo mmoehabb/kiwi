@@ -101,3 +101,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     Ok(())
 }
+
+pub mod intent;
+#[cfg(test)]
+pub mod module_integration_test;
