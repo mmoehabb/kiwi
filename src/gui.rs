@@ -1,7 +1,6 @@
 /// The GUI component handles rendering the Kiwi mascot using `egui`.
 /// It is responsible for displaying the playful parrot and updating its visual state
 /// (e.g., listening, thinking, speaking) seamlessly as an overlay on the desktop.
-
 use eframe::egui;
 
 /// Represents the current visual state of the Kiwi mascot.

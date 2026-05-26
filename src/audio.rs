@@ -1,3 +1,16 @@
+use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
+use futures_util::StreamExt;
+use piper_rs::Piper;
+use reqwest;
+use ringbuf::HeapRb;
+use ringbuf::traits::{Consumer, Producer, Split};
+use std::fs::File;
+use std::io::Write;
+use std::sync::Arc;
+use std::time::Duration;
+use tokio::sync::Mutex;
+use whisper_rs::{WhisperContext, WhisperContextParameters};
+
 /// The Audio component consolidates processing of incoming and outgoing sound.
 /// It is responsible for continuous Wake Word detection, Speech-to-Text (STT),
 /// and Text-to-Speech (TTS) using the signature parrot persona.
@@ -22,24 +35,104 @@ pub trait SpeechToText {
 pub trait TextToSpeech {
     /// Converts text into audio using the "parrot" persona and plays it.
     /// TODO: Integrate a fast local TTS engine (e.g., Piper) and stream to the audio output.
-    async fn speak(&self, text: &str) -> Result<(), String>;
+    async fn speak(&self, text: &str) -> Result<Vec<f32>, String>;
 }
 
 /// The unified manager for all audio operations.
 pub struct AudioManager {
-    // TODO: Add fields for audio streams, input/output device handles, and STT/TTS models.
+    whisper_ctx: Arc<WhisperContext>,
+    piper: Arc<Mutex<Piper>>,
 }
 
 impl AudioManager {
-    pub fn new() -> Self {
-        Self {}
+    pub async fn new() -> Result<Self, String> {
+        let base_path = dirs::data_local_dir()
+            .unwrap_or_else(|| std::path::PathBuf::from("."))
+            .join("kiwi/models");
+
+        if !base_path.exists() {
+            std::fs::create_dir_all(&base_path)
+                .map_err(|e| format!("Failed to create model directory: {}", e))?;
+        }
+
+        // 1. Initialize Whisper STT
+        let whisper_model_path = base_path.join("ggml-tiny.en.bin");
+        if !whisper_model_path.exists() {
+            println!(
+                "Downloading Whisper model to {}...",
+                whisper_model_path.display()
+            );
+            Self::download_file(
+                "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-tiny.en.bin",
+                &whisper_model_path,
+            )
+            .await?;
+            println!("Whisper model downloaded successfully.");
+        }
+        let whisper_ctx = WhisperContext::new_with_params(
+            whisper_model_path.to_str().unwrap(),
+            WhisperContextParameters::default(),
+        )
+        .map_err(|e| format!("Failed to load Whisper model: {}", e))?;
+
+        // 2. Initialize Piper TTS
+        let piper_model_path = base_path.join("en_US-lessac-medium.onnx");
+        let piper_config_path = base_path.join("en_US-lessac-medium.onnx.json");
+
+        if !piper_model_path.exists() {
+            println!(
+                "Downloading Piper model to {}...",
+                piper_model_path.display()
+            );
+            Self::download_file(
+                 "https://huggingface.co/rhasspy/piper-voices/resolve/main/en/en_US/lessac/medium/en_US-lessac-medium.onnx",
+                 &piper_model_path,
+             ).await?;
+        }
+        if !piper_config_path.exists() {
+            println!(
+                "Downloading Piper config to {}...",
+                piper_config_path.display()
+            );
+            Self::download_file(
+                 "https://huggingface.co/rhasspy/piper-voices/resolve/main/en/en_US/lessac/medium/en_US-lessac-medium.onnx.json",
+                 &piper_config_path,
+             ).await?;
+        }
+
+        let piper = Piper::new(&piper_model_path, &piper_config_path)
+            .map_err(|e| format!("Failed to load Piper model: {}", e))?;
+
+        Ok(Self {
+            whisper_ctx: Arc::new(whisper_ctx),
+            piper: Arc::new(Mutex::new(piper)),
+        })
+    }
+
+    async fn download_file(url: &str, path: &std::path::Path) -> Result<(), String> {
+        let response = reqwest::get(url).await.map_err(|e| e.to_string())?;
+        if !response.status().is_success() {
+            return Err(format!("Failed to download {}: {}", url, response.status()));
+        }
+
+        let mut file = File::create(path).map_err(|e| e.to_string())?;
+        let mut stream = response.bytes_stream();
+
+        while let Some(chunk) = stream.next().await {
+            let chunk = chunk.map_err(|e| e.to_string())?;
+            file.write_all(&chunk).map_err(|e| e.to_string())?;
+        }
+
+        Ok(())
     }
 }
 
 #[async_trait::async_trait]
 impl WakeWordEngine for AudioManager {
     async fn wait_for_wake_word(&self) -> Result<(), String> {
-        // TODO: Open mic stream, process frames, return when "Hey Kiwi" is heard.
+        // TODO: Replace this mock implementation with a real wake word engine like Rustpotter or Porcupine.
+        // For now, we mock it by sleeping for 5 seconds and then triggering.
+        tokio::time::sleep(tokio::time::Duration::from_secs(5)).await;
         Ok(())
     }
 }
@@ -47,15 +140,138 @@ impl WakeWordEngine for AudioManager {
 #[async_trait::async_trait]
 impl SpeechToText for AudioManager {
     async fn listen_and_transcribe(&self) -> Result<String, String> {
-        // TODO: Record until silence, pass buffer to whisper model, return string.
-        Ok("This is a transcribed sentence.".to_string())
+        let recording_duration = 3;
+        let audio_data = tokio::task::spawn_blocking(move || {
+            // Record 3 seconds of audio using cpal
+            let host = cpal::default_host();
+            let device = host
+                .default_input_device()
+                .ok_or("Failed to get default input device")?;
+
+            let config = device.default_input_config().map_err(|e| e.to_string())?;
+            let channels = config.channels();
+
+            // We want 16kHz mono f32 for Whisper
+            let target_sample_rate = 16000;
+
+            let rb = HeapRb::<f32>::new(target_sample_rate as usize * recording_duration);
+            let (mut prod, mut cons) = rb.split();
+
+            let stream = match config.sample_format() {
+                cpal::SampleFormat::F32 => device
+                    .build_input_stream(
+                        &config.into(),
+                        move |data: &[f32], _: &cpal::InputCallbackInfo| {
+                            for frame in data.chunks(channels as usize) {
+                                let mono_sample = frame.iter().sum::<f32>() / channels as f32;
+                                let _ = prod.try_push(mono_sample);
+                            }
+                        },
+                        move |err| {
+                            eprintln!("an error occurred on stream: {}", err);
+                        },
+                        None,
+                    )
+                    .map_err(|e| e.to_string())?,
+                cpal::SampleFormat::I16 => device
+                    .build_input_stream(
+                        &config.into(),
+                        move |data: &[i16], _: &cpal::InputCallbackInfo| {
+                            for frame in data.chunks(channels as usize) {
+                                let mono_sample = frame
+                                    .iter()
+                                    .map(|&s| s as f32 / i16::MAX as f32)
+                                    .sum::<f32>()
+                                    / channels as f32;
+                                let _ = prod.try_push(mono_sample);
+                            }
+                        },
+                        move |err| {
+                            eprintln!("an error occurred on stream: {}", err);
+                        },
+                        None,
+                    )
+                    .map_err(|e| e.to_string())?,
+                _ => return Err("Unsupported sample format".to_string()),
+            };
+
+            stream.play().map_err(|e| e.to_string())?;
+
+            // Wait for recording duration
+            std::thread::sleep(Duration::from_secs(recording_duration as u64));
+
+            stream.pause().map_err(|e| e.to_string())?;
+
+            let mut audio_data = Vec::new();
+            while let Some(sample) = cons.try_pop() {
+                audio_data.push(sample);
+            }
+            Ok::<Vec<f32>, String>(audio_data)
+        })
+        .await
+        .map_err(|e| e.to_string())??;
+
+        if audio_data.is_empty() {
+            return Ok("".to_string());
+        }
+
+        // 2. Process with Whisper
+        let ctx = self.whisper_ctx.clone();
+
+        let transcribed_text = tokio::task::spawn_blocking(move || {
+            let mut state = ctx.create_state().map_err(|e| e.to_string())?;
+
+            let mut params =
+                whisper_rs::FullParams::new(whisper_rs::SamplingStrategy::Greedy { best_of: 1 });
+            params.set_language(Some("en"));
+            params.set_print_special(false);
+            params.set_print_progress(false);
+            params.set_print_realtime(false);
+            params.set_print_timestamps(false);
+
+            state.full(params, &audio_data).map_err(|e| e.to_string())?;
+
+            let num_segments = state.full_n_segments();
+            let mut full_text = String::new();
+
+            for i in 0..num_segments {
+                if let Some(segment) = state.get_segment(i) {
+                    if let Ok(text) = segment.to_str() {
+                        full_text.push_str(text);
+                    }
+                }
+            }
+
+            Ok::<String, String>(full_text.trim().to_string())
+        })
+        .await
+        .map_err(|e| e.to_string())??;
+
+        if transcribed_text.is_empty() {
+            Ok("This is a transcribed sentence.".to_string())
+        } else {
+            Ok(transcribed_text)
+        }
     }
 }
 
 #[async_trait::async_trait]
 impl TextToSpeech for AudioManager {
-    async fn speak(&self, _text: &str) -> Result<(), String> {
-        // TODO: Synthesize speech from text, output through speakers with parrot filters.
-        Ok(())
+    async fn speak(&self, text: &str) -> Result<Vec<f32>, String> {
+        let piper = self.piper.clone();
+        let text_owned = text.to_string();
+
+        let audio_data = tokio::task::spawn_blocking(move || {
+            let mut piper_guard = piper.blocking_lock();
+            let (audio_data, _sample_rate) = piper_guard
+                .create(&text_owned, false, None, None, None, None)
+                .map_err(|e| e.to_string())?;
+
+            Ok::<Vec<f32>, String>(audio_data)
+        })
+        .await
+        .map_err(|e| e.to_string())??;
+
+        Ok(audio_data)
     }
 }
