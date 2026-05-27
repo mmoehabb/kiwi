@@ -1,27 +1,6 @@
-use serde::{Deserialize, Serialize};
+use kiwi_core::intent::{Intent, IntentRouter};
 
-/// Enumerates the possible intents determined from user input.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(tag = "type")]
-pub enum Intent {
-    /// Simple conversational response.
-    Chat,
-    /// Requires up-to-date information.
-    SearchRequired { query: String },
-    /// Requires executing a plugin or command.
-    ExecuteCommand { command: String },
-}
-
-/// Trait defining how incoming user text is routed.
-#[async_trait::async_trait]
-pub trait IntentRouter {
-    /// Determines the action required for the given input.
-    // NOTE: We are currently using prompt-engineering with the LLM to determine intent.
-    // We may want to rethink this in the future (e.g., use a faster local classifier, regex heuristics, or grammar sampling) for better latency and reliability.
-    async fn route_intent(&self, transcribed_text: &str) -> Result<Intent, String>;
-}
-
-use crate::llm::LlmEngine;
+use kiwi_core::llm::LlmEngine;
 
 pub struct LlmIntentRouter<'a> {
     llm: &'a (dyn LlmEngine + Send + Sync),
@@ -90,7 +69,7 @@ mod tests {
 
     struct MockLlm;
     #[async_trait::async_trait]
-    impl crate::llm::LlmEngine for MockLlm {
+    impl kiwi_core::llm::LlmEngine for MockLlm {
         async fn load_model(&mut self, _m: &str, _t: &str) -> Result<(), String> {
             Ok(())
         }

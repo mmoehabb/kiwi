@@ -2974,6 +2974,7 @@ dependencies = [
  "egui",
  "futures-util",
  "hound",
+ "kiwi-core",
  "ndarray 0.17.2",
  "piper-rs",
  "reqwest",
@@ -2987,6 +2988,14 @@ dependencies = [
  "tokio",
  "tokio-stream",
  "whisper-rs",
+]
+
+[[package]]
+name = "kiwi-core"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "serde",
 ]
 
 [[package]]

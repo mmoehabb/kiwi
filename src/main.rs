@@ -6,18 +6,13 @@ pub mod memory;
 pub mod plugin;
 pub mod web;
 
-use crate::audio::{AudioManager, SpeechToText, TextToSpeech, WakeWordEngine};
+use crate::audio::AudioManager;
 use crate::gui::KiwiGui;
+use kiwi_core::audio::{SpeechToText, TextToSpeech, WakeWordEngine};
+use kiwi_core::event::KiwiEvent;
 use rodio::{OutputStream, Sink};
 use std::sync::Arc;
 use tokio::sync::mpsc;
-
-#[derive(Debug)]
-pub enum KiwiEvent {
-    WakeWordDetected,
-    TranscribedText(String),
-    AssistantResponse(String),
-}
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -103,5 +98,3 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 }
 
 pub mod intent;
-#[cfg(test)]
-pub mod module_integration_test;

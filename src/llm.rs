@@ -1,21 +1,9 @@
 use candle_core::quantized::gguf_file;
 use candle_core::{Device, Tensor};
 use candle_transformers::models::quantized_llama::ModelWeights;
+use kiwi_core::llm::LlmEngine;
 use std::sync::{Arc, Mutex};
 use tokenizers::Tokenizer;
-
-/// Trait defining the core capabilities of the Local LLM.
-#[async_trait::async_trait]
-pub trait LlmEngine: Send + Sync {
-    /// Loads a model into memory from a given file path (e.g., a GGUF file).
-    async fn load_model(&mut self, model_path: &str, tokenizer_path: &str) -> Result<(), String>;
-
-    /// Generates text based on a given prompt string.
-    async fn generate(&self, prompt: &str) -> Result<String, String>;
-
-    /// Generates text with specific constraints (e.g., JSON schema) for tool usage.
-    async fn generate_structured(&self, prompt: &str) -> Result<String, String>;
-}
 
 /// The main struct for managing local inference.
 pub struct LocalLlm {

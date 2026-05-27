@@ -1,6 +1,7 @@
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use dasp::{Signal, interpolate::linear::Linear, signal};
 use futures_util::StreamExt;
+use kiwi_core::audio::{SpeechToText, TextToSpeech, WakeWordEngine};
 use piper_rs::Piper;
 use reqwest;
 use ringbuf::HeapRb;
@@ -11,33 +12,6 @@ use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::Mutex;
 use whisper_rs::{WhisperContext, WhisperContextParameters};
-
-/// The Audio component consolidates processing of incoming and outgoing sound.
-/// It is responsible for continuous Wake Word detection, Speech-to-Text (STT),
-/// and Text-to-Speech (TTS) using the signature parrot persona.
-
-#[async_trait::async_trait]
-pub trait WakeWordEngine {
-    /// Starts continuously listening to the default microphone.
-    /// Blocks or yields until the wake word ("Hey Kiwi") is detected.
-    /// TODO: Use a lightweight local library (e.g., rustpotter) for detection.
-    async fn wait_for_wake_word(&self) -> Result<(), String>;
-}
-
-#[async_trait::async_trait]
-pub trait SpeechToText {
-    /// Captures a segment of audio and transcribes it into text.
-    /// TODO: Implement VAD (Voice Activity Detection) to know when the user stops speaking,
-    /// then run a small local Whisper model.
-    async fn listen_and_transcribe(&self) -> Result<String, String>;
-}
-
-#[async_trait::async_trait]
-pub trait TextToSpeech {
-    /// Converts text into audio using the "parrot" persona and plays it.
-    /// TODO: Integrate a fast local TTS engine (e.g., Piper) and stream to the audio output.
-    async fn speak(&self, text: &str) -> Result<Vec<f32>, String>;
-}
 
 /// The unified manager for all audio operations.
 pub struct AudioManager {
