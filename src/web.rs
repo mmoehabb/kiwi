@@ -5,6 +5,12 @@ pub struct WebClient {
     // TODO: Add HTTP client instance here.
 }
 
+impl Default for WebClient {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl WebClient {
     pub fn new() -> Self {
         Self {}

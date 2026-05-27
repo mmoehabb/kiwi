@@ -187,7 +187,7 @@ impl SpeechToText for AudioManager {
 
         let target_sample_rate = 16000;
         let processed_audio = if input_sample_rate != target_sample_rate {
-            let mut signal = signal::from_iter(audio_data.into_iter());
+            let mut signal = signal::from_iter(audio_data);
             let interp = Linear::new(signal.next(), signal.next());
             signal
                 .from_hz_to_hz(interp, input_sample_rate as f64, target_sample_rate as f64)
@@ -219,10 +219,10 @@ impl SpeechToText for AudioManager {
             let mut full_text = String::new();
 
             for i in 0..num_segments {
-                if let Some(segment) = state.get_segment(i) {
-                    if let Ok(text) = segment.to_str() {
-                        full_text.push_str(text);
-                    }
+                if let Some(segment) = state.get_segment(i)
+                    && let Ok(text) = segment.to_str()
+                {
+                    full_text.push_str(text);
                 }
             }
 

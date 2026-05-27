@@ -8,6 +8,12 @@ pub struct RhaiEngine {
     // TODO: Maintain a list of loaded plugin scripts or an AST cache.
 }
 
+impl Default for RhaiEngine {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl RhaiEngine {
     pub fn new() -> Self {
         let engine = Engine::new();

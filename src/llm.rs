@@ -15,6 +15,12 @@ pub struct LocalLlm {
     seed: u64,
 }
 
+impl Default for LocalLlm {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl LocalLlm {
     pub fn new() -> Self {
         Self {
