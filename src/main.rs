@@ -1,13 +1,5 @@
-pub mod audio;
-pub mod config;
-pub mod gui;
-pub mod llm;
-pub mod memory;
-pub mod plugin;
-pub mod web;
-
-use crate::audio::AudioManager;
-use crate::gui::KiwiGui;
+use kiwi::audio::AudioManager;
+use kiwi::gui::KiwiGui;
 use kiwi_core::audio::{SpeechToText, TextToSpeech, WakeWordEngine};
 use kiwi_core::event::KiwiEvent;
 use rodio::{OutputStream, Sink};
@@ -96,5 +88,3 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     Ok(())
 }
-
-pub mod intent;
