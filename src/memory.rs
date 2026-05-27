@@ -1,5 +1,6 @@
 /// The Memory component handles conversation history, context windows, and intent routing.
 /// It decides whether a prompt goes directly to the LLM or triggers tools like search/plugins.
+
 use std::collections::VecDeque;
 
 /// A single message in the conversation history.

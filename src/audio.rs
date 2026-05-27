@@ -1,15 +1,16 @@
-use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
-use futures_util::StreamExt;
+use std::sync::Arc;
+use whisper_rs::{WhisperContext, WhisperContextParameters};
 use piper_rs::Piper;
-use reqwest;
+use tokio::sync::Mutex;
+use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
+use ringbuf::traits::{Producer, Consumer, Split};
 use ringbuf::HeapRb;
-use ringbuf::traits::{Consumer, Producer, Split};
+use std::time::Duration;
+use reqwest;
 use std::fs::File;
 use std::io::Write;
-use std::sync::Arc;
-use std::time::Duration;
-use tokio::sync::Mutex;
-use whisper_rs::{WhisperContext, WhisperContextParameters};
+use futures_util::StreamExt;
+use hound;
 
 /// The Audio component consolidates processing of incoming and outgoing sound.
 /// It is responsible for continuous Wake Word detection, Speech-to-Text (STT),
@@ -56,14 +57,14 @@ impl AudioManager {
         }
 
         // 1. Initialize Whisper STT
-        let whisper_model_path = base_path.join("ggml-tiny.en.bin");
+        let whisper_model_path = base_path.join("ggml-base.en.bin");
         if !whisper_model_path.exists() {
             println!(
                 "Downloading Whisper model to {}...",
                 whisper_model_path.display()
             );
             Self::download_file(
-                "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-tiny.en.bin",
+                "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base.en.bin", // Switched to Base instead of Tiny
                 &whisper_model_path,
             )
             .await?;
@@ -130,8 +131,7 @@ impl AudioManager {
 #[async_trait::async_trait]
 impl WakeWordEngine for AudioManager {
     async fn wait_for_wake_word(&self) -> Result<(), String> {
-        // TODO: Replace this mock implementation with a real wake word engine like Rustpotter or Porcupine.
-        // For now, we mock it by sleeping for 5 seconds and then triggering.
+        // Mock
         tokio::time::sleep(tokio::time::Duration::from_secs(5)).await;
         Ok(())
     }
@@ -141,8 +141,7 @@ impl WakeWordEngine for AudioManager {
 impl SpeechToText for AudioManager {
     async fn listen_and_transcribe(&self) -> Result<String, String> {
         let recording_duration = 3;
-        let audio_data = tokio::task::spawn_blocking(move || {
-            // Record 3 seconds of audio using cpal
+        let (audio_data, input_sample_rate) = tokio::task::spawn_blocking(move || {
             let host = cpal::default_host();
             let device = host
                 .default_input_device()
@@ -150,11 +149,9 @@ impl SpeechToText for AudioManager {
 
             let config = device.default_input_config().map_err(|e| e.to_string())?;
             let channels = config.channels();
+            let input_sample_rate = config.sample_rate().0;
 
-            // We want 16kHz mono f32 for Whisper
-            let target_sample_rate = 16000;
-
-            let rb = HeapRb::<f32>::new(target_sample_rate as usize * recording_duration);
+            let rb = HeapRb::<f32>::new(input_sample_rate as usize * recording_duration);
             let (mut prod, mut cons) = rb.split();
 
             let stream = match config.sample_format() {
@@ -197,7 +194,6 @@ impl SpeechToText for AudioManager {
 
             stream.play().map_err(|e| e.to_string())?;
 
-            // Wait for recording duration
             std::thread::sleep(Duration::from_secs(recording_duration as u64));
 
             stream.pause().map_err(|e| e.to_string())?;
@@ -206,7 +202,7 @@ impl SpeechToText for AudioManager {
             while let Some(sample) = cons.try_pop() {
                 audio_data.push(sample);
             }
-            Ok::<Vec<f32>, String>(audio_data)
+            Ok::<(Vec<f32>, u32), String>((audio_data, input_sample_rate))
         })
         .await
         .map_err(|e| e.to_string())??;
@@ -214,6 +210,20 @@ impl SpeechToText for AudioManager {
         if audio_data.is_empty() {
             return Ok("".to_string());
         }
+
+        // Write debug wav file
+        let _target_sample_rate = 16000;
+        let spec = hound::WavSpec {
+            channels: 1,
+            sample_rate: input_sample_rate,
+            bits_per_sample: 32,
+            sample_format: hound::SampleFormat::Float,
+        };
+        let mut writer = hound::WavWriter::create("debug_stt.wav", spec).map_err(|e| e.to_string())?;
+        for &sample in &audio_data {
+            writer.write_sample(sample).map_err(|e| e.to_string())?;
+        }
+        writer.finalize().map_err(|e| e.to_string())?;
 
         // 2. Process with Whisper
         let ctx = self.whisper_ctx.clone();

@@ -1,5 +1,6 @@
 /// The Config component manages `permissions.toml` and general application settings.
 /// It enforces the strict, whitelist-based security model.
+
 use serde::{Deserialize, Serialize};
 
 /// Represents the permissions granted to Kiwi by the user.

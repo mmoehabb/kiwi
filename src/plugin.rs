@@ -1,5 +1,6 @@
 /// The Plugin component provides extensibility to Kiwi via the Rhai scripting engine.
 /// It allows users to write scripts (`.rhai` files) that can add new commands or alter behaviors.
+
 use rhai::{Engine, Scope};
 
 /// Trait defining the plugin management capabilities.
