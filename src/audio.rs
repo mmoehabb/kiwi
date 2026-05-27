@@ -1,16 +1,16 @@
-use std::sync::Arc;
-use whisper_rs::{WhisperContext, WhisperContextParameters};
-use piper_rs::Piper;
-use tokio::sync::Mutex;
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
-use ringbuf::traits::{Producer, Consumer, Split};
-use ringbuf::HeapRb;
-use std::time::Duration;
+use dasp::{Signal, interpolate::linear::Linear, signal};
+use futures_util::StreamExt;
+use piper_rs::Piper;
 use reqwest;
+use ringbuf::HeapRb;
+use ringbuf::traits::{Consumer, Producer, Split};
 use std::fs::File;
 use std::io::Write;
-use futures_util::StreamExt;
-use hound;
+use std::sync::Arc;
+use std::time::Duration;
+use tokio::sync::Mutex;
+use whisper_rs::{WhisperContext, WhisperContextParameters};
 
 /// The Audio component consolidates processing of incoming and outgoing sound.
 /// It is responsible for continuous Wake Word detection, Speech-to-Text (STT),
@@ -211,19 +211,17 @@ impl SpeechToText for AudioManager {
             return Ok("".to_string());
         }
 
-        // Write debug wav file
-        let _target_sample_rate = 16000;
-        let spec = hound::WavSpec {
-            channels: 1,
-            sample_rate: input_sample_rate,
-            bits_per_sample: 32,
-            sample_format: hound::SampleFormat::Float,
+        let target_sample_rate = 16000;
+        let processed_audio = if input_sample_rate != target_sample_rate {
+            let mut signal = signal::from_iter(audio_data.into_iter());
+            let interp = Linear::new(signal.next(), signal.next());
+            signal
+                .from_hz_to_hz(interp, input_sample_rate as f64, target_sample_rate as f64)
+                .take(recording_duration * target_sample_rate as usize)
+                .collect::<Vec<f32>>()
+        } else {
+            audio_data
         };
-        let mut writer = hound::WavWriter::create("debug_stt.wav", spec).map_err(|e| e.to_string())?;
-        for &sample in &audio_data {
-            writer.write_sample(sample).map_err(|e| e.to_string())?;
-        }
-        writer.finalize().map_err(|e| e.to_string())?;
 
         // 2. Process with Whisper
         let ctx = self.whisper_ctx.clone();
@@ -239,7 +237,9 @@ impl SpeechToText for AudioManager {
             params.set_print_realtime(false);
             params.set_print_timestamps(false);
 
-            state.full(params, &audio_data).map_err(|e| e.to_string())?;
+            state
+                .full(params, &processed_audio)
+                .map_err(|e| e.to_string())?;
 
             let num_segments = state.full_n_segments();
             let mut full_text = String::new();

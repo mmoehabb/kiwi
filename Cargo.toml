@@ -7,6 +7,7 @@ edition = "2024"
 async-trait = "0.1.89"
 bytes = "1.11.1"
 cpal = "0.15.3"
+dasp = { version = "0.11.0", features = ["all"] }
 dirs = "6.0.0"
 eframe = "0.34.2"
 egui = "0.34.2"
