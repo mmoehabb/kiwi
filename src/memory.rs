@@ -1,28 +1,8 @@
-/// The Memory component handles conversation history, context windows, and intent routing.
-/// It decides whether a prompt goes directly to the LLM or triggers tools like search/plugins.
-use sqlx::{Row, sqlite::SqlitePool};
+use kiwi_core::memory::{ContextManager, Message};
+use sqlx::Row;
+use sqlx::SqlitePool;
 use std::collections::VecDeque;
 use std::path::PathBuf;
-
-/// A single message in the conversation history.
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct Message {
-    pub role: String, // e.g., "user", "assistant", "system"
-    pub content: String,
-}
-
-/// Trait defining the core logic for the context and memory system.
-#[async_trait::async_trait]
-pub trait ContextManager {
-    /// Appends a new message to the history.
-    async fn add_message(&mut self, message: Message) -> Result<(), String>;
-
-    /// Formats the current history into a prompt string suitable for the specific LLM.
-    fn build_prompt(&self) -> String;
-
-    /// Clears the memory context.
-    async fn clear(&mut self) -> Result<(), String>;
-}
 
 /// The main struct managing memory with SQLite persistence.
 pub struct MemoryBank {
