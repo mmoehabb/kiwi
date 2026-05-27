@@ -6,6 +6,12 @@ pub struct KiwiGui {
     // TODO: Add fields for animation frames, textures, or UI styling parameters.
 }
 
+impl Default for KiwiGui {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl KiwiGui {
     pub fn new() -> Self {
         Self {

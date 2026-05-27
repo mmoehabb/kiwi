@@ -5,6 +5,12 @@ pub struct Configuration {
     pub config: AppConfig,
 }
 
+impl Default for Configuration {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl Configuration {
     pub fn new() -> Self {
         Self {
