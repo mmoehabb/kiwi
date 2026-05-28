@@ -245,6 +245,7 @@ impl WakeWordEngine for AudioManager {
                 let mut full_text = String::new();
 
                 for i in 0..num_segments {
+                    #[allow(clippy::collapsible_if)]
                     if let Some(segment) = state.get_segment(i) {
                         if let Ok(text) = segment.to_str() {
                             full_text.push_str(text);
