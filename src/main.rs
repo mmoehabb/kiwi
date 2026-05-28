@@ -1,4 +1,5 @@
 use kiwi::audio::AudioManager;
+use kiwi::config::Configuration;
 use kiwi::gui::KiwiGui;
 use kiwi_core::audio::{SpeechToText, TextToSpeech, WakeWordEngine};
 use kiwi_core::event::KiwiEvent;
@@ -10,8 +11,13 @@ use tokio::sync::mpsc;
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("🦜 Starting Kiwi...");
 
-    let audio_mgr = Arc::new(AudioManager::new().await?);
+    // Load Configuration & Permissions
+    let mut config_mgr = Configuration::new();
+    if let Err(e) = config_mgr.load_from_file("~/.config/kiwi/permissions.toml") {
+        eprintln!("Warning: Failed to load config: {}", e);
+    }
 
+    let audio_mgr = Arc::new(AudioManager::new().await?);
     let (event_tx, mut event_rx) = mpsc::channel::<KiwiEvent>(32);
     let audio_mgr_clone = audio_mgr.clone();
 
