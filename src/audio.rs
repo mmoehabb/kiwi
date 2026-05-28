@@ -17,6 +17,9 @@ use whisper_rs::{WhisperContext, WhisperContextParameters};
 pub struct AudioManager {
     whisper_ctx: Arc<WhisperContext>,
     piper: Arc<Mutex<Piper>>,
+    // TODO: This tiny context is used as a temporary wake word detection mechanism.
+    // Replace this with a native Rust wake word engine (e.g., rustpotter when ML trait bound issues are resolved)
+    wakeword_ctx: Arc<WhisperContext>,
 }
 
 impl AudioManager {
@@ -30,7 +33,7 @@ impl AudioManager {
                 .map_err(|e| format!("Failed to create model directory: {}", e))?;
         }
 
-        // 1. Initialize Whisper STT
+        // 1. Initialize Whisper STT (Base model)
         let whisper_model_path = base_path.join("ggml-base.en.bin");
         if !whisper_model_path.exists() {
             println!(
@@ -38,7 +41,7 @@ impl AudioManager {
                 whisper_model_path.display()
             );
             Self::download_file(
-                "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base.en.bin", // Switched to Base instead of Tiny
+                "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base.en.bin",
                 &whisper_model_path,
             )
             .await?;
@@ -50,7 +53,28 @@ impl AudioManager {
         )
         .map_err(|e| format!("Failed to load Whisper model: {}", e))?;
 
-        // 2. Initialize Piper TTS
+        // 2. Initialize Whisper for Wake Word (Tiny model for faster inference)
+        // TODO: Replace this with a native Rust wake word engine in the future.
+        let wakeword_model_path = base_path.join("ggml-tiny.en.bin");
+        if !wakeword_model_path.exists() {
+            println!(
+                "Downloading temporary Wakeword Whisper model to {}...",
+                wakeword_model_path.display()
+            );
+            Self::download_file(
+                "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-tiny.en.bin",
+                &wakeword_model_path,
+            )
+            .await?;
+            println!("Temporary Wakeword model downloaded successfully.");
+        }
+        let wakeword_ctx = WhisperContext::new_with_params(
+            wakeword_model_path.to_str().unwrap(),
+            WhisperContextParameters::default(),
+        )
+        .map_err(|e| format!("Failed to load temporary Wakeword model: {}", e))?;
+
+        // 3. Initialize Piper TTS
         let piper_model_path = base_path.join("en_US-lessac-medium.onnx");
         let piper_config_path = base_path.join("en_US-lessac-medium.onnx.json");
 
@@ -81,6 +105,7 @@ impl AudioManager {
         Ok(Self {
             whisper_ctx: Arc::new(whisper_ctx),
             piper: Arc::new(Mutex::new(piper)),
+            wakeword_ctx: Arc::new(wakeword_ctx),
         })
     }
 
@@ -105,9 +130,140 @@ impl AudioManager {
 #[async_trait::async_trait]
 impl WakeWordEngine for AudioManager {
     async fn wait_for_wake_word(&self) -> Result<(), String> {
-        // Mock
-        tokio::time::sleep(tokio::time::Duration::from_secs(5)).await;
-        Ok(())
+        // We use chunking to constantly listen to the microphone.
+        // A short 1.5 second buffer seems ideal for "Hey Kiwi"
+        let recording_duration = 1.5;
+        let wakeword_ctx = self.wakeword_ctx.clone();
+
+        loop {
+            let (audio_data, input_sample_rate) = tokio::task::spawn_blocking(move || {
+                let host = cpal::default_host();
+                let device = host
+                    .default_input_device()
+                    .ok_or("Failed to get default input device")?;
+
+                let config = device.default_input_config().map_err(|e| e.to_string())?;
+                let channels = config.channels();
+                let input_sample_rate = config.sample_rate().0;
+
+                let rb =
+                    HeapRb::<f32>::new((input_sample_rate as f32 * recording_duration) as usize);
+                let (mut prod, mut cons) = rb.split();
+
+                let stream = match config.sample_format() {
+                    cpal::SampleFormat::F32 => device
+                        .build_input_stream(
+                            &config.into(),
+                            move |data: &[f32], _: &cpal::InputCallbackInfo| {
+                                for frame in data.chunks(channels as usize) {
+                                    let mono_sample = frame.iter().sum::<f32>() / channels as f32;
+                                    let _ = prod.try_push(mono_sample);
+                                }
+                            },
+                            move |err| {
+                                eprintln!("an error occurred on stream: {}", err);
+                            },
+                            None,
+                        )
+                        .map_err(|e| e.to_string())?,
+                    cpal::SampleFormat::I16 => device
+                        .build_input_stream(
+                            &config.into(),
+                            move |data: &[i16], _: &cpal::InputCallbackInfo| {
+                                for frame in data.chunks(channels as usize) {
+                                    let mono_sample = frame
+                                        .iter()
+                                        .map(|&s| s as f32 / i16::MAX as f32)
+                                        .sum::<f32>()
+                                        / channels as f32;
+                                    let _ = prod.try_push(mono_sample);
+                                }
+                            },
+                            move |err| {
+                                eprintln!("an error occurred on stream: {}", err);
+                            },
+                            None,
+                        )
+                        .map_err(|e| e.to_string())?,
+                    _ => return Err("Unsupported sample format".to_string()),
+                };
+
+                stream.play().map_err(|e| e.to_string())?;
+
+                std::thread::sleep(Duration::from_millis((recording_duration * 1000.0) as u64));
+
+                stream.pause().map_err(|e| e.to_string())?;
+
+                let mut audio_data = Vec::new();
+                while let Some(sample) = cons.try_pop() {
+                    audio_data.push(sample);
+                }
+                Ok::<(Vec<f32>, u32), String>((audio_data, input_sample_rate))
+            })
+            .await
+            .map_err(|e| e.to_string())??;
+
+            if audio_data.is_empty() {
+                continue;
+            }
+
+            let target_sample_rate = 16000;
+            let processed_audio = if input_sample_rate != target_sample_rate {
+                let mut signal = signal::from_iter(audio_data);
+                let interp = Linear::new(signal.next(), signal.next());
+                signal
+                    .from_hz_to_hz(interp, input_sample_rate as f64, target_sample_rate as f64)
+                    .take((recording_duration * target_sample_rate as f32) as usize)
+                    .collect::<Vec<f32>>()
+            } else {
+                audio_data
+            };
+
+            let ctx = wakeword_ctx.clone();
+
+            let transcribed_text = tokio::task::spawn_blocking(move || {
+                let mut state = ctx.create_state().map_err(|e| e.to_string())?;
+
+                let mut params =
+                    whisper_rs::FullParams::new(whisper_rs::SamplingStrategy::Greedy {
+                        best_of: 1,
+                    });
+                params.set_language(Some("en"));
+                params.set_print_special(false);
+                params.set_print_progress(false);
+                params.set_print_realtime(false);
+                params.set_print_timestamps(false);
+
+                // For performance, no timestamps needed for wakeword
+                params.set_token_timestamps(false);
+
+                state
+                    .full(params, &processed_audio)
+                    .map_err(|e| e.to_string())?;
+
+                let num_segments = state.full_n_segments();
+                let mut full_text = String::new();
+
+                for i in 0..num_segments {
+                    #[allow(clippy::collapsible_if)]
+                    if let Some(segment) = state.get_segment(i) {
+                        if let Ok(text) = segment.to_str() {
+                            full_text.push_str(text);
+                        }
+                    }
+                }
+
+                Ok::<String, String>(full_text.trim().to_lowercase())
+            })
+            .await
+            .map_err(|e| e.to_string())??;
+
+            let cleaned = transcribed_text.replace(|c: char| !c.is_alphanumeric() && c != ' ', "");
+
+            if cleaned.contains("hey kiwi") {
+                return Ok(());
+            }
+        }
     }
 }
 
