@@ -33,3 +33,6 @@ tokio-stream = "0.1.18"
 whisper-rs = "0.16.0"
 
 kiwi-core = { path = "core" }
+
+[dev-dependencies]
+tempfile = "3.27.0"
