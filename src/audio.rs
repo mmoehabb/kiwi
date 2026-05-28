@@ -270,7 +270,10 @@ impl WakeWordEngine for AudioManager {
 #[async_trait::async_trait]
 impl SpeechToText for AudioManager {
     async fn listen_and_transcribe(&self) -> Result<String, String> {
-        let recording_duration = 3;
+        let max_recording_duration_secs = 15;
+        let silence_threshold = 0.02; // TODO: estimate the silence threshold periodically in the future
+        let required_silence_duration_secs = 2.0;
+
         let (audio_data, input_sample_rate) = tokio::task::spawn_blocking(move || {
             let host = cpal::default_host();
             let device = host
@@ -281,7 +284,7 @@ impl SpeechToText for AudioManager {
             let channels = config.channels();
             let input_sample_rate = config.sample_rate().0;
 
-            let rb = HeapRb::<f32>::new(input_sample_rate as usize * recording_duration);
+            let rb = HeapRb::<f32>::new(input_sample_rate as usize * max_recording_duration_secs);
             let (mut prod, mut cons) = rb.split();
 
             let stream = match config.sample_format() {
@@ -324,15 +327,50 @@ impl SpeechToText for AudioManager {
 
             stream.play().map_err(|e| e.to_string())?;
 
-            std::thread::sleep(Duration::from_secs(recording_duration as u64));
+            let chunk_duration_ms = 100;
+            let max_iterations = (max_recording_duration_secs * 1000) / chunk_duration_ms;
+            let mut silent_chunks = 0;
+            let required_silent_chunks =
+                (required_silence_duration_secs * 1000.0 / chunk_duration_ms as f32) as usize;
+
+            let mut all_audio_data = Vec::new();
+
+            for _ in 0..max_iterations {
+                std::thread::sleep(Duration::from_millis(chunk_duration_ms as u64));
+
+                let mut chunk_audio = Vec::new();
+                while let Some(sample) = cons.try_pop() {
+                    chunk_audio.push(sample);
+                }
+
+                if !chunk_audio.is_empty() {
+                    let mut sum_squares = 0.0;
+                    for &sample in &chunk_audio {
+                        sum_squares += sample * sample;
+                    }
+                    let rms = (sum_squares / chunk_audio.len() as f32).sqrt();
+
+                    if rms < silence_threshold {
+                        silent_chunks += 1;
+                    } else {
+                        silent_chunks = 0;
+                    }
+
+                    all_audio_data.extend(chunk_audio);
+
+                    if silent_chunks >= required_silent_chunks {
+                        break;
+                    }
+                }
+            }
 
             stream.pause().map_err(|e| e.to_string())?;
 
-            let mut audio_data = Vec::new();
             while let Some(sample) = cons.try_pop() {
-                audio_data.push(sample);
+                all_audio_data.push(sample);
             }
-            Ok::<(Vec<f32>, u32), String>((audio_data, input_sample_rate))
+
+            Ok::<(Vec<f32>, u32), String>((all_audio_data, input_sample_rate))
         })
         .await
         .map_err(|e| e.to_string())??;
@@ -343,11 +381,15 @@ impl SpeechToText for AudioManager {
 
         let target_sample_rate = 16000;
         let processed_audio = if input_sample_rate != target_sample_rate {
-            let mut signal = signal::from_iter(audio_data);
+            let mut signal = signal::from_iter(audio_data.clone());
             let interp = Linear::new(signal.next(), signal.next());
+            // Need to know how many samples to take.
+            let samples_to_take = (audio_data.len() as f64
+                * (target_sample_rate as f64 / input_sample_rate as f64))
+                as usize;
             signal
                 .from_hz_to_hz(interp, input_sample_rate as f64, target_sample_rate as f64)
-                .take(recording_duration * target_sample_rate as usize)
+                .take(samples_to_take)
                 .collect::<Vec<f32>>()
         } else {
             audio_data

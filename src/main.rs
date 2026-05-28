@@ -25,6 +25,18 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             println!("🦜 Wake word detected!");
             let _ = event_tx.send(KiwiEvent::WakeWordDetected).await;
 
+            // Prompt the user to start talking
+            match audio_mgr_clone.speak("How can I help you?").await {
+                Ok(audio_buffer) => {
+                    let (_stream, stream_handle) = OutputStream::try_default().unwrap();
+                    let sink = Sink::try_new(&stream_handle).unwrap();
+                    let buffer = rodio::buffer::SamplesBuffer::new(1, 22050, audio_buffer);
+                    sink.append(buffer);
+                    sink.sleep_until_end();
+                }
+                Err(e) => eprintln!("TTS Error for wake prompt: {}", e),
+            }
+
             match audio_mgr_clone.listen_and_transcribe().await {
                 Ok(text) => {
                     println!("🦜 Heard: {}", text);
