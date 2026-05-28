@@ -245,10 +245,11 @@ impl WakeWordEngine for AudioManager {
                 let mut full_text = String::new();
 
                 for i in 0..num_segments {
-                    if let Some(segment) = state.get_segment(i)
-                        && let Ok(text) = segment.to_str() {
+                    if let Some(segment) = state.get_segment(i) {
+                        if let Ok(text) = segment.to_str() {
                             full_text.push_str(text);
                         }
+                    }
                 }
 
                 Ok::<String, String>(full_text.trim().to_lowercase())
@@ -374,9 +375,10 @@ impl SpeechToText for AudioManager {
 
             for i in 0..num_segments {
                 if let Some(segment) = state.get_segment(i)
-                    && let Ok(text) = segment.to_str() {
-                        full_text.push_str(text);
-                    }
+                    && let Ok(text) = segment.to_str()
+                {
+                    full_text.push_str(text);
+                }
             }
 
             Ok::<String, String>(full_text.trim().to_string())
