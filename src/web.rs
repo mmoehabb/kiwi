@@ -21,9 +21,12 @@ pub struct SearchResult {
     pub snippet: String,
 }
 
+use reqwest::Client;
+use scraper::{Html, Selector};
+
 /// The main struct handling outgoing web requests.
 pub struct WebClient {
-    // TODO: Add HTTP client instance here.
+    client: Client,
 }
 
 impl Default for WebClient {
@@ -34,19 +37,113 @@ impl Default for WebClient {
 
 impl WebClient {
     pub fn new() -> Self {
-        Self {}
+        let client = Client::builder()
+            .user_agent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36")
+            .build()
+            .unwrap_or_default();
+        Self { client }
     }
 }
 
 #[async_trait::async_trait]
 impl WebSearcher for WebClient {
-    async fn search(&self, _query: &str) -> Result<Vec<SearchResult>, String> {
-        // TODO: Construct search URL, perform GET request, parse results.
-        Ok(vec![])
+    async fn search(&self, query: &str) -> Result<Vec<SearchResult>, String> {
+        let url = format!(
+            "https://html.duckduckgo.com/html/?q={}",
+            urlencoding::encode(query)
+        );
+
+        let response = self
+            .client
+            .get(&url)
+            .send()
+            .await
+            .map_err(|e| format!("Failed to send request: {}", e))?;
+
+        let html_content = response
+            .text()
+            .await
+            .map_err(|e| format!("Failed to read response: {}", e))?;
+
+        let document = Html::parse_document(&html_content);
+        let result_selector =
+            Selector::parse(".result").map_err(|_| "Invalid selector".to_string())?;
+        let title_selector =
+            Selector::parse(".result__a").map_err(|_| "Invalid selector".to_string())?;
+        let snippet_selector =
+            Selector::parse(".result__snippet").map_err(|_| "Invalid selector".to_string())?;
+
+        let mut results = Vec::new();
+
+        for element in document.select(&result_selector) {
+            let title_el = element.select(&title_selector).next();
+            let snippet_el = element.select(&snippet_selector).next();
+
+            if let (Some(t), Some(s)) = (title_el, snippet_el) {
+                let title = t.text().collect::<Vec<_>>().join("");
+                let url = t.value().attr("href").unwrap_or("").to_string();
+                let snippet = s.text().collect::<Vec<_>>().join("");
+
+                results.push(SearchResult {
+                    title,
+                    url,
+                    snippet,
+                });
+            }
+        }
+
+        Ok(results)
     }
 
-    async fn fetch_and_extract_text(&self, _url: &str) -> Result<String, String> {
-        // TODO: Perform GET request, extract text nodes, strip HTML tags.
-        Ok("Extracted web text goes here.".to_string())
+    async fn fetch_and_extract_text(&self, url: &str) -> Result<String, String> {
+        let response = self
+            .client
+            .get(url)
+            .send()
+            .await
+            .map_err(|e| format!("Failed to send request: {}", e))?;
+
+        let html_content = response
+            .text()
+            .await
+            .map_err(|e| format!("Failed to read response: {}", e))?;
+
+        let document = Html::parse_document(&html_content);
+        let body_selector = Selector::parse("body").map_err(|_| "Invalid selector".to_string())?;
+        let remove_selectors = ["script", "style", "noscript", "iframe", "svg"];
+
+        if let Some(body) = document.select(&body_selector).next() {
+            let mut extracted_text = String::new();
+            for node in body.descendants() {
+                if let Some(element) = node.value().as_element() {
+                    let tag_name = element.name();
+                    if remove_selectors.contains(&tag_name) {
+                        continue;
+                    }
+                }
+                if let Some(text_node) = node.value().as_text() {
+                    let mut should_skip = false;
+                    for ancestor in node.ancestors() {
+                        if let Some(el) = ancestor.value().as_element() {
+                            if remove_selectors.contains(&el.name()) {
+                                should_skip = true;
+                                break;
+                            }
+                        }
+                    }
+                    if !should_skip {
+                        extracted_text.push_str(&text_node.text);
+                        extracted_text.push(' ');
+                    }
+                }
+            }
+
+            // basic whitespace compression
+            let compressed_text: String =
+                extracted_text.split_whitespace().collect::<Vec<_>>().join(" ");
+            Ok(compressed_text)
+        } else {
+            Err("No body element found in HTML".to_string())
+        }
     }
 }

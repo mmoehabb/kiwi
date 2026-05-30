@@ -1,5 +1,4 @@
-use kiwi::plugin::RhaiEngine;
-use kiwi_core::plugin::PluginManager;
+use kiwi::plugin::{PluginManager, RhaiEngine};
 use std::fs::File;
 use std::io::Write;
 use tempfile::tempdir;
