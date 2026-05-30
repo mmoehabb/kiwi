@@ -64,9 +64,10 @@ impl PluginManager for RhaiEngine {
             if filepath.is_file()
                 && filepath.extension().and_then(|s| s.to_str()) == Some("rhai")
                 && let Some(path_str) = filepath.to_str()
-                && let Err(e) = self.load_script(path_str) {
-                  println!("[PluginManager] Failed to load script {}: {}", path_str, e);
-                }
+                && let Err(e) = self.load_script(path_str)
+            {
+                println!("[PluginManager] Failed to load script {}: {}", path_str, e);
+            }
         }
 
         Ok(())
@@ -119,6 +120,9 @@ impl PluginManager for RhaiEngine {
             }
         }
 
-        Err(format!("Function '{}' not found in any loaded plugin.", func_name))
+        Err(format!(
+            "Function '{}' not found in any loaded plugin.",
+            func_name
+        ))
     }
 }
