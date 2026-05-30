@@ -35,7 +35,8 @@ impl Configuration {
         if !path.exists() {
             // Automatically generate a default one
             if let Some(parent) = path.parent() {
-                fs::create_dir_all(parent).map_err(|e| format!("Failed to create config dir: {}", e))?;
+                fs::create_dir_all(parent)
+                    .map_err(|e| format!("Failed to create config dir: {}", e))?;
             }
             let default_toml = toml::to_string_pretty(&self.config)
                 .map_err(|e| format!("Failed to serialize default config: {}", e))?;
@@ -44,10 +45,10 @@ impl Configuration {
             return Ok(());
         }
 
-        let contents = fs::read_to_string(path)
-            .map_err(|e| format!("Failed to read config file: {}", e))?;
-        self.config = toml::from_str(&contents)
-            .map_err(|e| format!("Failed to parse TOML: {}", e))?;
+        let contents =
+            fs::read_to_string(path).map_err(|e| format!("Failed to read config file: {}", e))?;
+        self.config =
+            toml::from_str(&contents).map_err(|e| format!("Failed to parse TOML: {}", e))?;
 
         Ok(())
     }
@@ -88,14 +89,26 @@ fn match_pattern(pattern: &str, target: &str) -> bool {
 
 impl PermissionManager for Configuration {
     fn is_command_allowed(&self, command: &str) -> bool {
-        self.config.permissions.allowed_commands.iter().any(|pattern| match_pattern(pattern, command))
+        self.config
+            .permissions
+            .allowed_commands
+            .iter()
+            .any(|pattern| match_pattern(pattern, command))
     }
 
     fn is_read_allowed(&self, path: &str) -> bool {
-        self.config.permissions.allowed_read_paths.iter().any(|pattern| match_pattern(pattern, path))
+        self.config
+            .permissions
+            .allowed_read_paths
+            .iter()
+            .any(|pattern| match_pattern(pattern, path))
     }
 
     fn is_write_allowed(&self, path: &str) -> bool {
-        self.config.permissions.allowed_write_paths.iter().any(|pattern| match_pattern(pattern, path))
+        self.config
+            .permissions
+            .allowed_write_paths
+            .iter()
+            .any(|pattern| match_pattern(pattern, path))
     }
 }

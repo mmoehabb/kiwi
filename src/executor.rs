@@ -1,4 +1,4 @@
-use crate::config::PermissionManager;
+use kiwi_core::config::PermissionManager;
 use std::process::Command;
 
 pub struct CommandExecutor<'a> {
