@@ -1,4 +1,25 @@
-use kiwi_core::web::{SearchResult, WebSearcher};
+/// The Web component acts as a bridge for the LLM when it lacks up-to-date information.
+/// It provides capabilities for searching Google and scraping web pages for context.
+
+#[async_trait::async_trait]
+pub trait WebSearcher {
+    /// Queries a search engine and returns a list of result snippets and URLs.
+    /// TODO: Implement a Google Search API integration or a custom scraper tool.
+    async fn search(&self, query: &str) -> Result<Vec<SearchResult>, String>;
+
+    /// Fetches the raw HTML of a given URL and extracts the readable text.
+    /// Useful for feeding articles or documentation into the LLM context.
+    /// TODO: Implement HTTP client (e.g., reqwest) and HTML parsing (e.g., scraper).
+    async fn fetch_and_extract_text(&self, url: &str) -> Result<String, String>;
+}
+
+/// A structured result from a web search.
+#[derive(Debug, Clone)]
+pub struct SearchResult {
+    pub title: String,
+    pub url: String,
+    pub snippet: String,
+}
 
 use reqwest::Client;
 use scraper::{Html, Selector};
@@ -7,12 +28,6 @@ use scraper::{Html, Selector};
 pub struct WebClient {
     client: Client,
     search_base_url: String,
-}
-
-impl Default for WebClient {
-    fn default() -> Self {
-        Self::new()
-    }
 }
 
 impl WebClient {
@@ -27,7 +42,8 @@ impl WebClient {
     }
 
     /// Internal constructor for testing to allow overriding the base search URL
-    pub fn with_base_url(base_url: &str) -> Self {
+    #[cfg(test)]
+    pub(crate) fn with_base_url(base_url: &str) -> Self {
         Self {
             client: Client::builder()
                 .user_agent("Mozilla/5.0 (Windows NT 10.0; Win64; x64)")
@@ -145,9 +161,8 @@ impl WebSearcher for WebClient {
         Ok(extracted_text.trim().to_string())
     }
 }
-
-use kiwi_core::llm::LlmEngine;
-use kiwi_core::memory::{ContextManager, Message};
+use crate::llm::LlmEngine;
+use crate::memory::{ContextManager, Message};
 
 pub struct WebTool<'a, W: WebSearcher, L: LlmEngine, C: ContextManager> {
     searcher: W,
@@ -191,14 +206,169 @@ impl<'a, W: WebSearcher, L: LlmEngine, C: ContextManager> WebTool<'a, W, L, C> {
 
         let recap = self.llm.generate(&prompt).await?;
 
-        _ = self.context_manager.add_message(Message {
+        self.context_manager.add_message(Message {
             role: "system".to_string(),
             content: format!(
                 "latest data fetched from the web about '{}': {}",
                 query, recap
             ),
-        }).await;
+        });
 
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::memory::MemoryBank;
+    use mockito::Server;
+
+    // Mock LlmEngine
+    struct MockLlm;
+    #[async_trait::async_trait]
+    impl LlmEngine for MockLlm {
+        async fn load_model(&mut self, _model_path: &str) -> Result<(), String> {
+            Ok(())
+        }
+
+        async fn generate(&self, prompt: &str) -> Result<String, String> {
+            Ok(format!(
+                "Mock recap for prompt: {}",
+                prompt.chars().take(20).collect::<String>()
+            ))
+        }
+
+        async fn generate_structured(&self, _prompt: &str) -> Result<String, String> {
+            Ok("".to_string())
+        }
+    }
+
+    #[tokio::test]
+    async fn test_web_client_search() {
+        let mut server = Server::new_async().await;
+
+        let mock_html = r#"
+        <html>
+            <body>
+                <div class="result">
+                    <h2 class="result__title">
+                        <a class="result__a" href="https://example.com/mock-result">Mock Result Title</a>
+                    </h2>
+                    <a class="result__snippet">This is a mock snippet for testing.</a>
+                </div>
+            </body>
+        </html>
+        "#;
+
+        let mock = server
+            .mock("GET", "/html/?q=test%20query")
+            .with_status(200)
+            .with_header("content-type", "text/html")
+            .with_body(mock_html)
+            .create_async()
+            .await;
+
+        let client = WebClient::with_base_url(&format!("{}/html/", server.url()));
+
+        let results = client.search("test query").await.unwrap();
+
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].title, "Mock Result Title");
+        assert_eq!(results[0].url, "https://example.com/mock-result");
+        assert_eq!(results[0].snippet, "This is a mock snippet for testing.");
+
+        mock.assert_async().await;
+    }
+
+    #[tokio::test]
+    async fn test_web_client_fetch_text() {
+        let mut server = Server::new_async().await;
+
+        let mock_html = r#"
+        <html>
+            <body>
+                <h1>Main Heading</h1>
+                <p>This is the content of the paragraph.</p>
+                <script>console.log('Ignore me');</script>
+            </body>
+        </html>
+        "#;
+
+        let mock = server
+            .mock("GET", "/test-page")
+            .with_status(200)
+            .with_header("content-type", "text/html")
+            .with_body(mock_html)
+            .create_async()
+            .await;
+
+        let client = WebClient::new(); // Base url doesn't matter for fetch_and_extract_text
+
+        let text = client
+            .fetch_and_extract_text(&format!("{}/test-page", server.url()))
+            .await
+            .unwrap();
+
+        assert!(text.contains("Main Heading"));
+        assert!(text.contains("This is the content of the paragraph."));
+        // Depending on scraper text extraction it might include script contents or whitespace
+
+        mock.assert_async().await;
+    }
+
+    #[tokio::test]
+    async fn test_web_tool_search_and_recap() {
+        let mut server = Server::new_async().await;
+        let server_url = server.url();
+
+        let mock_search_html = format!(
+            r#"
+        <html>
+            <body>
+                <div class="result">
+                    <h2 class="result__title">
+                        <a class="result__a" href="{}/test-content">Recap Test Title</a>
+                    </h2>
+                    <a class="result__snippet">Recap snippet.</a>
+                </div>
+            </body>
+        </html>
+        "#,
+            server_url
+        );
+
+        let search_mock = server
+            .mock("GET", "/html/?q=recap%20test")
+            .with_status(200)
+            .with_header("content-type", "text/html")
+            .with_body(mock_search_html)
+            .create_async()
+            .await;
+
+        let content_mock = server
+            .mock("GET", "/test-content")
+            .with_status(200)
+            .with_header("content-type", "text/html")
+            .with_body("<html><body><p>Detailed fetched content</p></body></html>")
+            .create_async()
+            .await;
+
+        let client = WebClient::with_base_url(&format!("{}/html/", server_url));
+        let llm = MockLlm;
+        let mut memory = MemoryBank::new(1000);
+
+        let mut tool = WebTool::new(client, llm, &mut memory);
+
+        tool.search_and_recap("recap test").await.unwrap();
+
+        search_mock.assert_async().await;
+        content_mock.assert_async().await;
+
+        // Assert memory was updated correctly
+        assert_eq!(memory.history.len(), 1);
+        let msg = &memory.history[0];
+        assert_eq!(msg.role, "system");
+        assert!(msg.content.starts_with("latest data fetched from the web about 'recap test': Mock recap for prompt: Recap the following"));
     }
 }

@@ -1,14 +1,41 @@
-use kiwi_core::config::{AppConfig, PermissionManager};
+/// The Config component manages `permissions.toml` and general application settings.
+/// It enforces the strict, whitelist-based security model.
+use serde::{Deserialize, Serialize};
+
+/// Represents the permissions granted to Kiwi by the user.
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct PermissionsConfig {
+    /// List of allowed shell commands (can include wildcards like `git *`).
+    pub allowed_commands: Vec<String>,
+    /// List of directories Kiwi is allowed to read from.
+    pub allowed_read_paths: Vec<String>,
+    /// List of directories Kiwi is allowed to write to.
+    pub allowed_write_paths: Vec<String>,
+}
+
+/// The overall configuration for the application.
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct AppConfig {
+    pub permissions: PermissionsConfig,
+    // TODO: Add other settings (e.g., model_path, wake_word_sensitivity).
+}
+
+/// Trait defining how to check if an action is permitted.
+pub trait PermissionManager {
+    /// Checks if executing a specific shell command is allowed.
+    /// TODO: Implement glob/wildcard matching against the whitelist.
+    fn is_command_allowed(&self, command: &str) -> bool;
+
+    /// Checks if a specific file path is allowed for reading.
+    fn is_read_allowed(&self, path: &str) -> bool;
+
+    /// Checks if a specific file path is allowed for writing.
+    fn is_write_allowed(&self, path: &str) -> bool;
+}
 
 /// Struct handling the loading and querying of configuration.
 pub struct Configuration {
     pub config: AppConfig,
-}
-
-impl Default for Configuration {
-    fn default() -> Self {
-        Self::new()
-    }
 }
 
 impl Configuration {
