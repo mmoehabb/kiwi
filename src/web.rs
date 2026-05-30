@@ -124,11 +124,11 @@ impl WebSearcher for WebClient {
                 if let Some(text_node) = node.value().as_text() {
                     let mut should_skip = false;
                     for ancestor in node.ancestors() {
-                        if let Some(el) = ancestor.value().as_element() {
-                            if remove_selectors.contains(&el.name()) {
-                                should_skip = true;
-                                break;
-                            }
+                        if let Some(el) = ancestor.value().as_element()
+                            && remove_selectors.contains(&el.name())
+                        {
+                            should_skip = true;
+                            break;
                         }
                     }
                     if !should_skip {
@@ -139,8 +139,10 @@ impl WebSearcher for WebClient {
             }
 
             // basic whitespace compression
-            let compressed_text: String =
-                extracted_text.split_whitespace().collect::<Vec<_>>().join(" ");
+            let compressed_text: String = extracted_text
+                .split_whitespace()
+                .collect::<Vec<_>>()
+                .join(" ");
             Ok(compressed_text)
         } else {
             Err("No body element found in HTML".to_string())
