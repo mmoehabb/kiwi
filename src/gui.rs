@@ -1,15 +1,35 @@
-use kiwi_core::gui::{MascotRenderer, MascotState};
+/// The GUI component handles rendering the Kiwi mascot using `egui`.
+/// It is responsible for displaying the playful parrot and updating its visual state
+/// (e.g., listening, thinking, speaking) seamlessly as an overlay on the desktop.
+use eframe::egui;
+
+/// Represents the current visual state of the Kiwi mascot.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MascotState {
+    /// Mascot is hidden or idle.
+    Idle,
+    /// Mascot is actively listening to the microphone.
+    Listening,
+    /// Mascot is processing an intent or searching.
+    Thinking,
+    /// Mascot is outputting text via TTS.
+    Speaking,
+}
+
+/// Trait defining the core behavior of the Kiwi GUI.
+pub trait MascotRenderer {
+    /// Initializes the GUI window and starts the rendering loop.
+    /// TODO: Implement a transparent/overlay window setup in eframe.
+    fn run(&mut self) -> Result<(), String>;
+
+    /// Updates the mascot's state to trigger different animations or UI cues.
+    fn set_state(&mut self, state: MascotState);
+}
 
 /// The main application struct for the Kiwi GUI.
 pub struct KiwiGui {
     pub state: MascotState,
     // TODO: Add fields for animation frames, textures, or UI styling parameters.
-}
-
-impl Default for KiwiGui {
-    fn default() -> Self {
-        Self::new()
-    }
 }
 
 impl KiwiGui {

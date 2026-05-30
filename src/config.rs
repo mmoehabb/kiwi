@@ -1,4 +1,37 @@
-use kiwi_core::config::{AppConfig, PermissionManager};
+/// The Config component manages `permissions.toml` and general application settings.
+/// It enforces the strict, whitelist-based security model.
+use serde::{Deserialize, Serialize};
+
+/// Represents the permissions granted to Kiwi by the user.
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct PermissionsConfig {
+    /// List of allowed shell commands (can include wildcards like `git *`).
+    pub allowed_commands: Vec<String>,
+    /// List of directories Kiwi is allowed to read from.
+    pub allowed_read_paths: Vec<String>,
+    /// List of directories Kiwi is allowed to write to.
+    pub allowed_write_paths: Vec<String>,
+}
+
+/// The overall configuration for the application.
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct AppConfig {
+    pub permissions: PermissionsConfig,
+    // TODO: Add other settings (e.g., model_path, wake_word_sensitivity).
+}
+
+/// Trait defining how to check if an action is permitted.
+pub trait PermissionManager {
+    /// Checks if executing a specific shell command is allowed.
+    /// TODO: Implement glob/wildcard matching against the whitelist.
+    fn is_command_allowed(&self, command: &str) -> bool;
+
+    /// Checks if a specific file path is allowed for reading.
+    fn is_read_allowed(&self, path: &str) -> bool;
+
+    /// Checks if a specific file path is allowed for writing.
+    fn is_write_allowed(&self, path: &str) -> bool;
+}
 
 use std::fs;
 use std::path::Path;
@@ -6,12 +39,6 @@ use std::path::Path;
 /// Struct handling the loading and querying of configuration.
 pub struct Configuration {
     pub config: AppConfig,
-}
-
-impl Default for Configuration {
-    fn default() -> Self {
-        Self::new()
-    }
 }
 
 impl Configuration {
@@ -35,7 +62,8 @@ impl Configuration {
         if !path.exists() {
             // Automatically generate a default one
             if let Some(parent) = path.parent() {
-                fs::create_dir_all(parent).map_err(|e| format!("Failed to create config dir: {}", e))?;
+                fs::create_dir_all(parent)
+                    .map_err(|e| format!("Failed to create config dir: {}", e))?;
             }
             let default_toml = toml::to_string_pretty(&self.config)
                 .map_err(|e| format!("Failed to serialize default config: {}", e))?;
@@ -44,10 +72,10 @@ impl Configuration {
             return Ok(());
         }
 
-        let contents = fs::read_to_string(path)
-            .map_err(|e| format!("Failed to read config file: {}", e))?;
-        self.config = toml::from_str(&contents)
-            .map_err(|e| format!("Failed to parse TOML: {}", e))?;
+        let contents =
+            fs::read_to_string(path).map_err(|e| format!("Failed to read config file: {}", e))?;
+        self.config =
+            toml::from_str(&contents).map_err(|e| format!("Failed to parse TOML: {}", e))?;
 
         Ok(())
     }
@@ -88,14 +116,26 @@ fn match_pattern(pattern: &str, target: &str) -> bool {
 
 impl PermissionManager for Configuration {
     fn is_command_allowed(&self, command: &str) -> bool {
-        self.config.permissions.allowed_commands.iter().any(|pattern| match_pattern(pattern, command))
+        self.config
+            .permissions
+            .allowed_commands
+            .iter()
+            .any(|pattern| match_pattern(pattern, command))
     }
 
     fn is_read_allowed(&self, path: &str) -> bool {
-        self.config.permissions.allowed_read_paths.iter().any(|pattern| match_pattern(pattern, path))
+        self.config
+            .permissions
+            .allowed_read_paths
+            .iter()
+            .any(|pattern| match_pattern(pattern, path))
     }
 
     fn is_write_allowed(&self, path: &str) -> bool {
-        self.config.permissions.allowed_write_paths.iter().any(|pattern| match_pattern(pattern, path))
+        self.config
+            .permissions
+            .allowed_write_paths
+            .iter()
+            .any(|pattern| match_pattern(pattern, path))
     }
 }
