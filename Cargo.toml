@@ -3,36 +3,13 @@ name = "kiwi"
 version = "0.1.0"
 edition = "2024"
 
-[workspace]
-members = ["core"]
-
 [dependencies]
 async-trait = "0.1.89"
-bytes = "1.11.1"
-cpal = "0.15.3"
-dasp = { version = "0.11.0", features = ["all"] }
-candle-core = "0.10.2"
-candle-transformers = "0.10.2"
-dirs = "6.0.0"
 eframe = "0.34.2"
 egui = "0.34.2"
-futures-util = "0.3.32"
-hound = "3.5.1"
-ndarray = "0.17.2"
-piper-rs = { version = "0.2.0", features = ["compile-espeak-intonations"] }
-reqwest = { version = "0.13.4", features = ["stream"] }
 rhai = "1.25.0"
-ringbuf = "0.5.0"
-rodio = "0.17.3"
 serde = { version = "1.0.228", features = ["derive"] }
-serde_json = "1.0.150"
-sqlx = { version = "0.9.0", features = ["sqlite", "runtime-tokio"] }
-tokenizers = "0.23.1"
 tokio = { version = "1.52.3", features = ["full"] }
-tokio-stream = "0.1.18"
-whisper-rs = "0.16.0"
-
-kiwi-core = { path = "core" }
 
 [dev-dependencies]
 tempfile = "3.27.0"

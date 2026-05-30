@@ -1,5 +1,22 @@
-use kiwi_core::plugin::PluginManager;
+//! The Plugin component provides extensibility to Kiwi via the Rhai scripting engine.
+//! It allows users to write scripts (`.rhai` files) that can add new commands or alter behaviors.
+
 use rhai::{Engine, Scope};
+
+/// Trait defining the plugin management capabilities.
+pub trait PluginManager {
+    /// Loads all `.rhai` scripts from the given directory into the engine.
+    fn load_plugins_from_dir(&mut self, dir_path: &str) -> Result<(), String>;
+
+    /// Loads a `.rhai` script from the given file path into the engine.
+    /// TODO: Implement directory watching to auto-reload plugins.
+    fn load_script(&mut self, filepath: &str) -> Result<(), String>;
+
+    /// Executes a specific function defined in a loaded plugin script.
+    /// TODO: Make sure the execution environment is safely sandboxed.
+    fn execute_function(&mut self, func_name: &str, args: Vec<String>) -> Result<String, String>;
+}
+
 use std::collections::HashMap;
 
 /// The core engine struct handling Rhai integration.
@@ -47,9 +64,9 @@ impl PluginManager for RhaiEngine {
             if filepath.is_file()
                 && filepath.extension().and_then(|s| s.to_str()) == Some("rhai")
                 && let Some(path_str) = filepath.to_str()
-                    && let Err(e) = self.load_script(path_str) {
-                        println!("[PluginManager] Failed to load script {}: {}", path_str, e);
-                    }
+                && let Err(e) = self.load_script(path_str) {
+                  println!("[PluginManager] Failed to load script {}: {}", path_str, e);
+                }
         }
 
         Ok(())
@@ -102,10 +119,6 @@ impl PluginManager for RhaiEngine {
             }
         }
 
-        Err(format!(
-            "Function '{}' not found in any loaded plugin.",
-            func_name
-        ))
+        Err(format!("Function '{}' not found in any loaded plugin.", func_name))
     }
 }
-
