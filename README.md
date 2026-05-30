@@ -30,12 +30,6 @@ To build and run Kiwi, you will need the following installed on your system:
 - Audio drivers (e.g., ALSA/PulseAudio for Linux, CoreAudio for macOS, WASAPI for Windows)
 - SSL/TLS libraries (for internet search and web scraping)
 
-**System Dependencies (Linux/Ubuntu):**
-To compile the audio and AI dependencies, you will need a few system libraries installed:
-```bash
-sudo apt-get update && sudo apt-get install -y libasound2-dev pkg-config cmake clang curl build-essential wget
-```
-
 ### Installation & Build
 
 1. Clone the repository:
