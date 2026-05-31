@@ -7,6 +7,7 @@ pub mod plugin;
 pub mod web;
 
 use crate::gui::KiwiGui;
+use tokio::sync::mpsc;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -37,32 +38,41 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // would be spawned into separate Tokio tasks communicating via channels,
     // while the GUI runs on the main thread.
 
-    /*
+    // Create a channel for UI state updates
+    let (_tx, rx) = mpsc::channel(100);
+
+    // Spawn the background pipeline task
     tokio::spawn(async move {
-        loop {
-            // Background pipeline conceptual flow:
-            // audio_mgr.wait_for_wake_word().await;
-            // update_gui_state(Listening);
-            // let text = audio_mgr.listen_and_transcribe().await;
-            // let intent = router.route_intent(&text).await;
-            // ... route to LLM, Web, or Plugin ...
-            // let response = llm_engine.generate(...).await;
-            // update_gui_state(Speaking);
-            // audio_mgr.speak(&response).await;
-            // update_gui_state(Idle);
-        }
+        // TODO: integrate background events properly via the rx channel.
+        // For example:
+        // loop {
+        //     // audio_mgr.wait_for_wake_word().await;
+        //     let _ = tx.send(MascotState::Listening).await;
+        //     // let text = audio_mgr.listen_and_transcribe().await;
+        //     // let intent = router.route_intent(&text).await;
+        //     let _ = tx.send(MascotState::Thinking).await;
+        //     // ... route to LLM, Web, or Plugin ...
+        //     // let response = llm_engine.generate(...).await;
+        //     let _ = tx.send(MascotState::Speaking).await;
+        //     // audio_mgr.speak(&response).await;
+        //     let _ = tx.send(MascotState::Idle).await;
+        // }
     });
-    */
 
     let options = eframe::NativeOptions {
-        // TODO: Configure transparent, un-decorated window for the mascot.
+        // Configure transparent, un-decorated window for the mascot.
+        viewport: eframe::egui::ViewportBuilder::default()
+            .with_decorations(false)
+            .with_transparent(true)
+            .with_always_on_top()
+            .with_inner_size([320.0, 320.0]),
         ..Default::default()
     };
 
     eframe::run_native(
         "Kiwi 🦜",
         options,
-        Box::new(|_cc| Ok(Box::new(KiwiGui::new()))),
+        Box::new(|_cc| Ok(Box::new(KiwiGui::new(rx)))),
     )?;
 
     Ok(())
