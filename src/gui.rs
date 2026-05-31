@@ -3,6 +3,7 @@
 //! (e.g., listening, thinking, speaking) seamlessly as an overlay on the desktop.
 
 use eframe::egui;
+use tokio::sync::mpsc;
 
 /// Represents the current visual state of the Kiwi mascot.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -20,7 +21,6 @@ pub enum MascotState {
 /// Trait defining the core behavior of the Kiwi GUI.
 pub trait MascotRenderer {
     /// Initializes the GUI window and starts the rendering loop.
-    /// TODO: Implement a transparent/overlay window setup in eframe.
     fn run(&mut self) -> Result<(), String>;
 
     /// Updates the mascot's state to trigger different animations or UI cues.
@@ -30,47 +30,119 @@ pub trait MascotRenderer {
 /// The main application struct for the Kiwi GUI.
 pub struct KiwiGui {
     pub state: MascotState,
-    // TODO: Add fields for animation frames, textures, or UI styling parameters.
-}
+    pub rx: mpsc::Receiver<MascotState>,
 
-impl Default for KiwiGui {
-    fn default() -> Self {
-        Self::new()
-    }
+    // Cached textures for each state
+    idle_texture: Option<egui::TextureHandle>,
+    listening_texture: Option<egui::TextureHandle>,
+    thinking_texture: Option<egui::TextureHandle>,
+    speaking_texture: Option<egui::TextureHandle>,
+
+    position_set: bool,
 }
 
 impl KiwiGui {
-    pub fn new() -> Self {
+    pub fn new(rx: mpsc::Receiver<MascotState>) -> Self {
         Self {
             state: MascotState::Idle,
+            rx,
+            idle_texture: None,
+            listening_texture: None,
+            thinking_texture: None,
+            speaking_texture: None,
+            position_set: false,
         }
+    }
+
+    fn load_texture(ctx: &egui::Context, name: &str, path: &str) -> Option<egui::TextureHandle> {
+        let image = image::open(path).ok()?;
+        let size = [image.width() as _, image.height() as _];
+        let image_buffer = image.to_rgba8();
+        let pixels = image_buffer.as_flat_samples();
+        let color_image = egui::ColorImage::from_rgba_unmultiplied(size, pixels.as_slice());
+        Some(ctx.load_texture(name, color_image, Default::default()))
     }
 }
 
 impl eframe::App for KiwiGui {
-    fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
-        // TODO: Implement actual egui rendering logic here.
-        // Example: Draw a parrot icon, show a bubble if speaking, etc.
+    fn update(&mut self, ctx: &egui::Context, frame: &mut eframe::Frame) {
+        // Poll for state updates from the channel
+        while let Ok(new_state) = self.rx.try_recv() {
+            self.state = new_state;
+        }
+
+        // Initialize textures on first frame
+        if self.idle_texture.is_none() {
+            self.idle_texture = Self::load_texture(ctx, "idle", "assets/idle.png");
+            self.listening_texture = Self::load_texture(ctx, "listening", "assets/listening.png");
+            self.thinking_texture = Self::load_texture(ctx, "thinking", "assets/thinking.png");
+            self.speaking_texture = Self::load_texture(ctx, "speaking", "assets/speaking.png");
+        }
+
+        // Position window in the bottom-right corner of the monitor once
+        if !self.position_set {
+            #[allow(clippy::collapsible_if)]
+            if let Some(monitor_size) = ctx.input(|i| i.viewport().monitor_size) {
+                let window_size = egui::vec2(320.0, 320.0);
+                let padding = 20.0;
+
+                let target_pos = egui::pos2(
+                    monitor_size.x - window_size.x - padding,
+                    monitor_size.y - window_size.y - padding,
+                );
+
+                ctx.send_viewport_cmd(egui::ViewportCommand::OuterPosition(target_pos));
+                self.position_set = true;
+            }
+        }
+
+        // Create transparent central panel
+        let panel_frame = egui::Frame {
+            fill: egui::Color32::TRANSPARENT,
+            inner_margin: egui::Margin::same(0),
+            ..Default::default()
+        };
+
         #[allow(deprecated)]
-        egui::CentralPanel::default().show(ctx, |ui| {
-            ui.heading("Kiwi 🦜");
-            ui.label(format!("State: {:?}", self.state));
-        });
+        egui::CentralPanel::default()
+            .frame(panel_frame)
+            .show(ctx, |ui| {
+                self.ui(ui, frame);
+            });
+
+        // Request repaint to ensure smooth transitions if any state changed
+        ctx.request_repaint();
     }
 
-    // Required trait method. No specific UI to push onto default context frame here.
-    fn ui(&mut self, _ui: &mut egui::Ui, _frame: &mut eframe::Frame) {}
+    fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
+        let texture = match self.state {
+            MascotState::Idle => &self.idle_texture,
+            MascotState::Listening => &self.listening_texture,
+            MascotState::Thinking => &self.thinking_texture,
+            MascotState::Speaking => &self.speaking_texture,
+        };
+
+        if let Some(tex) = texture {
+            ui.add(egui::Image::new(tex));
+        } else {
+            // Fallback text if images fail to load
+            ui.heading("Kiwi 🦜");
+            ui.label(format!("State: {:?}", self.state));
+        }
+    }
+
+    fn clear_color(&self, _visuals: &egui::Visuals) -> [f32; 4] {
+        // Completely transparent background
+        [0.0, 0.0, 0.0, 0.0]
+    }
 }
 
 impl MascotRenderer for KiwiGui {
     fn run(&mut self) -> Result<(), String> {
-        // TODO: Create eframe::NativeOptions with transparency and no decorations.
-        // eframe::run_native(...)
         Ok(())
     }
 
     fn set_state(&mut self, state: MascotState) {
         self.state = state;
-        // TODO: Trigger a repaint or animation state change.
     }
 }
