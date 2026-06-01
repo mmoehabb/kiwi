@@ -1,7 +1,7 @@
 use async_trait::async_trait;
 use candle_core::quantized::gguf_file;
 use candle_core::{Device, Tensor};
-use candle_transformers::models::quantized_llama::ModelWeights;
+use candle_transformers::models::quantized_qwen2::ModelWeights;
 use std::sync::{Arc, Mutex};
 use tokenizers::Tokenizer;
 
@@ -59,7 +59,7 @@ impl LocalLlm {
 
         let mut all_tokens = vec![];
         let mut next_token;
-        let eos_token = tokenizer.token_to_id("<|eot_id|>").unwrap_or(2); // Llama 3 eos token fallback
+        let eos_token = tokenizer.token_to_id("<|im_end|>").unwrap_or(151645); // Qwen 2 eos token fallback
 
         let mut logits_processor = candle_transformers::generation::LogitsProcessor::new(
             self.seed,
