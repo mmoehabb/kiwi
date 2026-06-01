@@ -25,15 +25,19 @@ async fn setup_models() -> Result<(PathBuf, PathBuf), Box<dyn std::error::Error>
     let model_dir = home.join(".local").join("kiwi").join("models");
     std::fs::create_dir_all(&model_dir)?;
 
-    let model_path = model_dir.join("nvidia_Llama-3.1-Nemotron-Nano-4B-v1.1-Q4_0.gguf");
-    let tokenizer_path = model_dir.join("tokenizer.json");
+    let model_path = model_dir.join("qwen2.5-1.5b-instruct-q4_0.gguf");
+    let tokenizer_path = model_dir.join("qwen_tokenizer.json");
 
     if !model_path.exists() {
-        download_file("https://huggingface.co/bartowski/nvidia_Llama-3.1-Nemotron-Nano-4B-v1.1-GGUF/resolve/main/nvidia_Llama-3.1-Nemotron-Nano-4B-v1.1-Q4_0.gguf", &model_path).await?;
+        download_file("https://huggingface.co/Qwen/Qwen2.5-1.5B-Instruct-GGUF/resolve/main/qwen2.5-1.5b-instruct-q4_0.gguf", &model_path).await?;
     }
 
     if !tokenizer_path.exists() {
-        download_file("https://huggingface.co/nvidia/Llama-3.1-Nemotron-Nano-4B-v1.1/resolve/main/tokenizer.json", &tokenizer_path).await?;
+        download_file(
+            "https://huggingface.co/Qwen/Qwen2.5-1.5B-Instruct/resolve/main/tokenizer.json",
+            &tokenizer_path,
+        )
+        .await?;
     }
 
     Ok((model_path, tokenizer_path))
