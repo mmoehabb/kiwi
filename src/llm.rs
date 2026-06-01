@@ -47,6 +47,9 @@ impl LocalLlm {
 
         let mut model = model_mutex.lock().map_err(|e| e.to_string())?;
 
+        // Clear previous KV cache state to prevent shape mismatch errors on consecutive generations
+        model.clear_kv_cache();
+
         let tokens = tokenizer
             .encode(prompt, true)
             .map_err(|e| e.to_string())?

@@ -5,8 +5,8 @@ edition = "2024"
 
 [dependencies]
 async-trait = "0.1.89"
-candle-core = "0.10.2"
-candle-transformers = "0.10.2"
+candle-core = { git = "https://github.com/huggingface/candle.git" }
+candle-transformers = { git = "https://github.com/huggingface/candle.git" }
 cpal = "0.15"
 dasp = { version = "0.11", features = ["signal", "interpolate", "interpolate-linear"] }
 dirs = "6.0.0"
