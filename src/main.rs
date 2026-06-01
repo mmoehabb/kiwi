@@ -1,13 +1,58 @@
 use kiwi::audio::{AudioManager, SpeechToText, TextToSpeech, WakeWordEngine};
 use kiwi::event::KiwiEvent;
 use kiwi::gui::{KiwiGui, MascotState};
+use kiwi::llm::{LlmEngine, LocalLlm};
 use rodio::{OutputStream, Sink};
+use std::io::Write;
+use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::sync::mpsc;
+
+async fn download_file(url: &str, path: &PathBuf) -> Result<(), Box<dyn std::error::Error>> {
+    println!("Downloading {} to {:?}", url, path);
+    let mut response = reqwest::get(url).await?.error_for_status()?;
+    let file = std::fs::File::create(path)?;
+    while let Some(chunk) = response.chunk().await? {
+        let chunk_clone = chunk.clone();
+        let mut f = file.try_clone()?;
+        tokio::task::spawn_blocking(move || f.write_all(&chunk_clone)).await??;
+    }
+    Ok(())
+}
+
+async fn setup_models() -> Result<(PathBuf, PathBuf), Box<dyn std::error::Error>> {
+    let home = dirs::home_dir().ok_or("Could not find home directory")?;
+    let model_dir = home.join(".local").join("kiwi").join("models");
+    std::fs::create_dir_all(&model_dir)?;
+
+    let model_path = model_dir.join("nvidia_Llama-3.1-Nemotron-Nano-4B-v1.1-Q4_0.gguf");
+    let tokenizer_path = model_dir.join("tokenizer.json");
+
+    if !model_path.exists() {
+        download_file("https://huggingface.co/bartowski/nvidia_Llama-3.1-Nemotron-Nano-4B-v1.1-GGUF/resolve/main/nvidia_Llama-3.1-Nemotron-Nano-4B-v1.1-Q4_0.gguf", &model_path).await?;
+    }
+
+    if !tokenizer_path.exists() {
+        download_file("https://huggingface.co/nvidia/Llama-3.1-Nemotron-Nano-4B-v1.1/resolve/main/tokenizer.json", &tokenizer_path).await?;
+    }
+
+    Ok((model_path, tokenizer_path))
+}
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("Starting Kiwi...");
+
+    let (model_path, tokenizer_path) = setup_models().await?;
+
+    println!("Initializing LLM Engine...");
+    let mut llm = LocalLlm::new();
+    llm.load_model(
+        model_path.to_str().unwrap(),
+        tokenizer_path.to_str().unwrap(),
+    )
+    .await?;
+    let llm = Arc::new(llm);
 
     let audio_mgr = Arc::new(AudioManager::new().await?);
 
@@ -36,6 +81,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 Err(e) => eprintln!("TTS Error for wake prompt: {}", e),
             }
 
+            let llm_clone = llm.clone();
             match audio_mgr_clone.listen_and_transcribe().await {
                 Ok(text) => {
                     println!("Heard: {}", text);
@@ -43,7 +89,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                         .send(KiwiEvent::TranscribedText(text.clone()))
                         .await;
 
-                    let response = format!("I heard you say: {}", text);
+                    let response = match llm_clone.generate(&text).await {
+                        Ok(res) => res,
+                        Err(e) => format!("Error generating response: {}", e),
+                    };
+                    println!("Response: {}", response);
 
                     match audio_mgr_clone.speak(&response).await {
                         Ok(audio_buffer) => {
