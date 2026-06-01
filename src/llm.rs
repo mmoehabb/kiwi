@@ -55,6 +55,11 @@ impl LocalLlm {
             .map_err(|e| e.to_string())?
             .get_ids()
             .to_vec();
+
+        if tokens.is_empty() {
+            return Err("Prompt resulted in empty token list".to_string());
+        }
+
         let prompt_len = tokens.len();
 
         let mut all_tokens = vec![];
@@ -82,6 +87,9 @@ impl LocalLlm {
 
             // Logits is shape (seq_len, vocab_size). We need the last token's logits.
             let seq_len = logits.dim(0).map_err(|e| e.to_string())?;
+            if seq_len == 0 {
+                return Err("Logits sequence length is 0".to_string());
+            }
             let logits = logits.get(seq_len - 1).map_err(|e| e.to_string())?;
 
             // If structured, we might want to guide it to output JSON
