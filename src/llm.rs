@@ -1,5 +1,7 @@
+use crate::config::Configuration;
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
+use std::sync::Arc;
 
 #[async_trait]
 pub trait LlmEngine {
@@ -11,12 +13,7 @@ pub trait LlmEngine {
 pub struct LocalLlm {
     model_name: String,
     client: reqwest::Client,
-}
-
-impl Default for LocalLlm {
-    fn default() -> Self {
-        Self::new()
-    }
+    config: Arc<Configuration>,
 }
 
 #[derive(Serialize)]
@@ -34,17 +31,11 @@ struct OllamaGenerateResponse {
 }
 
 impl LocalLlm {
-    pub fn new() -> Self {
+    pub fn new(config: Arc<Configuration>) -> Self {
         Self {
-            model_name: "qwen2.5:1.5b".to_string(),
+            model_name: config.app.model_name.clone(),
             client: reqwest::Client::new(),
-        }
-    }
-
-    pub fn with_model(model_name: &str) -> Self {
-        Self {
-            model_name: model_name.to_string(),
-            client: reqwest::Client::new(),
+            config,
         }
     }
 
@@ -104,6 +95,7 @@ impl Clone for LocalLlm {
         Self {
             model_name: self.model_name.clone(),
             client: self.client.clone(),
+            config: self.config.clone(),
         }
     }
 }

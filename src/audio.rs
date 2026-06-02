@@ -18,6 +18,7 @@ pub trait SpeechToText {
 pub trait TextToSpeech {
     async fn speak(&self, text: &str) -> Result<Vec<f32>, String>;
 }
+use crate::config::Configuration;
 use reqwest;
 use ringbuf::HeapRb;
 use ringbuf::traits::{Consumer, Producer, Split};
@@ -35,10 +36,11 @@ pub struct AudioManager {
     // TODO: This tiny context is used as a temporary wake word detection mechanism.
     // Replace this with a native Rust wake word engine (e.g., rustpotter when ML trait bound issues are resolved)
     wakeword_ctx: Arc<WhisperContext>,
+    config: Arc<Configuration>,
 }
 
 impl AudioManager {
-    pub async fn new() -> Result<Self, String> {
+    pub async fn new(config: Arc<Configuration>) -> Result<Self, String> {
         let base_path = dirs::data_local_dir()
             .unwrap_or_else(|| std::path::PathBuf::from("."))
             .join("kiwi/models");
@@ -121,6 +123,7 @@ impl AudioManager {
             whisper_ctx: Arc::new(whisper_ctx),
             piper: Arc::new(Mutex::new(piper)),
             wakeword_ctx: Arc::new(wakeword_ctx),
+            config,
         })
     }
 
@@ -274,8 +277,14 @@ impl WakeWordEngine for AudioManager {
             .map_err(|e| e.to_string())??;
 
             let cleaned = transcribed_text.replace(|c: char| !c.is_alphanumeric() && c != ' ', "");
+            let wake_word = self
+                .config
+                .app
+                .wake_word
+                .replace(|c: char| !c.is_alphanumeric() && c != ' ', "")
+                .to_lowercase();
 
-            if cleaned.contains("hey kiwi") {
+            if cleaned.contains(&wake_word) {
                 return Ok(());
             }
         }
