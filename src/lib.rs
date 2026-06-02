@@ -5,6 +5,7 @@ pub mod config;
 pub mod event;
 pub mod gui;
 pub mod intent;
+pub mod interruption;
 pub mod llm;
 pub mod memory;
 pub mod permissions;

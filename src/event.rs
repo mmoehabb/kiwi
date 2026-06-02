@@ -3,4 +3,5 @@ pub enum KiwiEvent {
     WakeWordDetected,
     TranscribedText(String),
     AssistantResponse(String),
+    Idle,
 }
