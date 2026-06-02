@@ -1,4 +1,5 @@
 use kiwi::audio::{AudioManager, SpeechToText, TextToSpeech, WakeWordEngine};
+use kiwi::config::Configuration;
 use kiwi::event::KiwiEvent;
 use kiwi::gui::{KiwiGui, MascotState};
 use kiwi::llm::{LlmEngine, LocalLlm};
@@ -10,12 +11,14 @@ use tokio::sync::mpsc;
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("Starting Kiwi...");
 
+    let config = Arc::new(Configuration::new());
+
     println!("Initializing LLM Engine with Ollama...");
-    let mut llm = LocalLlm::with_model("qwen2.5:1.5b");
+    let mut llm = LocalLlm::new(config.clone());
     llm.load_model("", "").await?;
     let llm = Arc::new(llm);
 
-    let audio_mgr = Arc::new(AudioManager::new().await?);
+    let audio_mgr = Arc::new(AudioManager::new(config.clone()).await?);
 
     let (event_tx, mut event_rx) = mpsc::channel::<KiwiEvent>(32);
     let (gui_tx, gui_rx) = mpsc::channel::<MascotState>(32);
