@@ -90,6 +90,19 @@ impl AudioManager {
             .await?;
             println!("Temporary Wakeword model downloaded successfully.");
         }
+        let wakeword_model_path = base_path.join("ggml-tiny.en.bin");
+        if !wakeword_model_path.exists() {
+            println!(
+                "Downloading temporary Wakeword Whisper model to {}...",
+                wakeword_model_path.display()
+            );
+            Self::download_file(
+                "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-tiny.en.bin",
+                &wakeword_model_path,
+            )
+            .await?;
+            println!("Temporary Wakeword model downloaded successfully.");
+        }
         let wakeword_ctx = WhisperContext::new_with_params(
             wakeword_model_path.to_str().unwrap(),
             WhisperContextParameters::default(),
@@ -153,10 +166,35 @@ impl AudioManager {
 #[async_trait::async_trait]
 impl WakeWordEngine for AudioManager {
     async fn wait_for_wake_word(&self) -> Result<(), String> {
-        // We use chunking to constantly listen to the microphone.
-        // A short 1.5 second buffer seems ideal for "Hey Kiwi"
-        let recording_duration = 1.5;
-        let wakeword_ctx = self.wakeword_ctx.clone();
+        let recording_duration = 0.5; // Short chunks for real-time processing
+
+        // Initialize Rustpotter
+        let mut config = rustpotter::RustpotterConfig::default();
+        // cpal's typical sample rate, though we should really get it from the device
+        config.fmt.sample_rate = 48000;
+        config.detector.avg_threshold = self.config.app.wake_word_sensitivity;
+        config.detector.threshold = self.config.app.wake_word_sensitivity / 2.0;
+
+        let mut rustpotter = rustpotter::Rustpotter::new(&config).map_err(|e| e.to_string())?;
+
+        // Ideally we would load a wakeword model (.rpw) here.
+        // For demonstration we will load it if it exists in the models directory.
+        let base_path = dirs::data_local_dir()
+            .unwrap_or_else(|| std::path::PathBuf::from("."))
+            .join("kiwi/models");
+
+        let wakeword_model_path = base_path.join("hey_kiwi.rpw");
+        if wakeword_model_path.exists() {
+            rustpotter
+                .add_wakeword_from_file("kiwi", &wakeword_model_path.to_string_lossy())
+                .map_err(|e| e.to_string())?;
+        } else {
+            // Fallback warning or download logic could go here
+            println!(
+                "Warning: Wake word model 'hey_kiwi.rpw' not found at {:?}",
+                wakeword_model_path
+            );
+        }
 
         loop {
             let (audio_data, input_sample_rate) = tokio::task::spawn_blocking(move || {
@@ -230,67 +268,77 @@ impl WakeWordEngine for AudioManager {
                 continue;
             }
 
-            let target_sample_rate = 16000;
-            let processed_audio = if input_sample_rate != target_sample_rate {
-                let mut signal = signal::from_iter(audio_data);
-                let interp = Linear::new(signal.next(), signal.next());
-                signal
-                    .from_hz_to_hz(interp, input_sample_rate as f64, target_sample_rate as f64)
-                    .take((recording_duration * target_sample_rate as f32) as usize)
-                    .collect::<Vec<f32>>()
+            // Since cpal device sample rate might be different from 48000,
+            // rustpotter allows runtime sample rate config update or we can just pass the audio.
+            // Ideally we configure Rustpotter's format to match the actual input_sample_rate
+
+            let ctx = self.wakeword_ctx.clone();
+
+            if wakeword_model_path.exists() {
+                let detection = rustpotter.process_samples::<f32>(audio_data.clone());
+                if detection.is_some() {
+                    return Ok(());
+                }
             } else {
-                audio_data
-            };
+                let target_sample_rate = 16000;
+                let processed_audio = if input_sample_rate != target_sample_rate {
+                    let mut signal = signal::from_iter(audio_data);
+                    let interp = Linear::new(signal.next(), signal.next());
+                    signal
+                        .from_hz_to_hz(interp, input_sample_rate as f64, target_sample_rate as f64)
+                        .take((recording_duration * target_sample_rate as f32) as usize)
+                        .collect::<Vec<f32>>()
+                } else {
+                    audio_data
+                };
 
-            let ctx = wakeword_ctx.clone();
+                let transcribed_text = tokio::task::spawn_blocking(move || {
+                    let mut state = ctx.create_state().map_err(|e| e.to_string())?;
 
-            let transcribed_text = tokio::task::spawn_blocking(move || {
-                let mut state = ctx.create_state().map_err(|e| e.to_string())?;
+                    let mut params =
+                        whisper_rs::FullParams::new(whisper_rs::SamplingStrategy::Greedy {
+                            best_of: 1,
+                        });
+                    params.set_language(Some("en"));
+                    params.set_print_special(false);
+                    params.set_print_progress(false);
+                    params.set_print_realtime(false);
+                    params.set_print_timestamps(false);
+                    params.set_token_timestamps(false);
 
-                let mut params =
-                    whisper_rs::FullParams::new(whisper_rs::SamplingStrategy::Greedy {
-                        best_of: 1,
-                    });
-                params.set_language(Some("en"));
-                params.set_print_special(false);
-                params.set_print_progress(false);
-                params.set_print_realtime(false);
-                params.set_print_timestamps(false);
+                    state
+                        .full(params, &processed_audio)
+                        .map_err(|e| e.to_string())?;
 
-                // For performance, no timestamps needed for wakeword
-                params.set_token_timestamps(false);
+                    let num_segments = state.full_n_segments();
+                    let mut full_text = String::new();
 
-                state
-                    .full(params, &processed_audio)
-                    .map_err(|e| e.to_string())?;
-
-                let num_segments = state.full_n_segments();
-                let mut full_text = String::new();
-
-                for i in 0..num_segments {
-                    #[allow(clippy::collapsible_if)]
-                    if let Some(segment) = state.get_segment(i) {
-                        if let Ok(text) = segment.to_str() {
-                            full_text.push_str(text);
+                    for i in 0..num_segments {
+                        #[allow(clippy::collapsible_if)]
+                        if let Some(segment) = state.get_segment(i) {
+                            if let Ok(text) = segment.to_str() {
+                                full_text.push_str(text);
+                            }
                         }
                     }
+
+                    Ok::<String, String>(full_text.trim().to_lowercase())
+                })
+                .await
+                .map_err(|e| e.to_string())??;
+
+                let cleaned =
+                    transcribed_text.replace(|c: char| !c.is_alphanumeric() && c != ' ', "");
+                let wake_word = self
+                    .config
+                    .app
+                    .wake_word
+                    .replace(|c: char| !c.is_alphanumeric() && c != ' ', "")
+                    .to_lowercase();
+
+                if cleaned.contains(&wake_word) {
+                    return Ok(());
                 }
-
-                Ok::<String, String>(full_text.trim().to_lowercase())
-            })
-            .await
-            .map_err(|e| e.to_string())??;
-
-            let cleaned = transcribed_text.replace(|c: char| !c.is_alphanumeric() && c != ' ', "");
-            let wake_word = self
-                .config
-                .app
-                .wake_word
-                .replace(|c: char| !c.is_alphanumeric() && c != ' ', "")
-                .to_lowercase();
-
-            if cleaned.contains(&wake_word) {
-                return Ok(());
             }
         }
     }

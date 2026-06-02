@@ -4,6 +4,7 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
+rustpotter = { path = "vendor/rustpotter", default-features = false }
 async-trait = "0.1.89"
 cpal = "0.15"
 dasp = { version = "0.11", features = ["signal", "interpolate", "interpolate-linear"] }
@@ -27,6 +28,7 @@ tokio = { version = "1.52.3", features = ["full"] }
 toml = "1.1.2"
 urlencoding = "2.1.3"
 whisper-rs = "0.16"
+hound = "3.5.1"
 
 [dev-dependencies]
 tempfile = "3.27.0"
