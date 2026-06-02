@@ -12,6 +12,11 @@ pub trait WakeWordEngine {
 #[async_trait]
 pub trait SpeechToText {
     async fn listen_and_transcribe(&self) -> Result<String, String>;
+    async fn transcribe_audio(
+        &self,
+        audio_data: Vec<f32>,
+        input_sample_rate: u32,
+    ) -> Result<String, String>;
 }
 
 #[async_trait]
@@ -296,6 +301,7 @@ impl SpeechToText for AudioManager {
     async fn listen_and_transcribe(&self) -> Result<String, String> {
         let max_recording_duration_secs = 15;
         let silence_threshold = 0.02; // TODO: estimate the silence threshold periodically in the future
+        let initial_silence_duration_secs = 5.0;
         let required_silence_duration_secs = 2.0;
 
         let (audio_data, input_sample_rate) = tokio::task::spawn_blocking(move || {
@@ -356,8 +362,11 @@ impl SpeechToText for AudioManager {
             let mut silent_chunks = 0;
             let required_silent_chunks =
                 (required_silence_duration_secs * 1000.0 / chunk_duration_ms as f32) as usize;
+            let initial_silent_chunks =
+                (initial_silence_duration_secs * 1000.0 / chunk_duration_ms as f32) as usize;
 
             let mut all_audio_data = Vec::new();
+            let mut has_spoken = false;
 
             for _ in 0..max_iterations {
                 std::thread::sleep(Duration::from_millis(chunk_duration_ms as u64));
@@ -378,11 +387,17 @@ impl SpeechToText for AudioManager {
                         silent_chunks += 1;
                     } else {
                         silent_chunks = 0;
+                        has_spoken = true;
                     }
 
                     all_audio_data.extend(chunk_audio);
 
-                    if silent_chunks >= required_silent_chunks {
+                    if !has_spoken && silent_chunks >= initial_silent_chunks {
+                        all_audio_data.clear();
+                        break;
+                    }
+
+                    if has_spoken && silent_chunks >= required_silent_chunks {
                         break;
                     }
                 }
@@ -403,6 +418,14 @@ impl SpeechToText for AudioManager {
             return Ok("".to_string());
         }
 
+        self.transcribe_audio(audio_data, input_sample_rate).await
+    }
+
+    async fn transcribe_audio(
+        &self,
+        audio_data: Vec<f32>,
+        input_sample_rate: u32,
+    ) -> Result<String, String> {
         let target_sample_rate = 16000;
         let processed_audio = if input_sample_rate != target_sample_rate {
             let mut signal = signal::from_iter(audio_data.clone());
@@ -453,11 +476,7 @@ impl SpeechToText for AudioManager {
         .await
         .map_err(|e| e.to_string())??;
 
-        if transcribed_text.is_empty() {
-            Ok("This is a transcribed sentence.".to_string())
-        } else {
-            Ok(transcribed_text)
-        }
+        Ok(transcribed_text)
     }
 }
 
