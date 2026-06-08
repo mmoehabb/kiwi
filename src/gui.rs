@@ -16,6 +16,8 @@ pub enum MascotState {
     Thinking,
     /// Mascot is outputting text via TTS.
     Speaking,
+    /// Mascot is in onboarding state, prompting user to record wakeword.
+    Onboarding { recorded: usize, is_recording: bool },
 }
 
 /// Trait defining the core behavior of the Kiwi GUI.
@@ -39,10 +41,21 @@ pub struct KiwiGui {
     speaking_texture: Option<egui::TextureHandle>,
 
     position_set: bool,
+
+    // Onboarding UI state
+    pub templates_recorded: usize,
+    pub is_recording: bool,
+    pub tx_gui: Option<mpsc::Sender<GuiEvent>>,
+}
+
+#[derive(Debug, Clone)]
+pub enum GuiEvent {
+    RecordSample,
+    DoneOnboarding,
 }
 
 impl KiwiGui {
-    pub fn new(rx: mpsc::Receiver<MascotState>) -> Self {
+    pub fn new(rx: mpsc::Receiver<MascotState>, tx_gui: mpsc::Sender<GuiEvent>) -> Self {
         Self {
             state: MascotState::Idle,
             rx,
@@ -51,6 +64,9 @@ impl KiwiGui {
             thinking_texture: None,
             speaking_texture: None,
             position_set: false,
+            templates_recorded: 0,
+            is_recording: false,
+            tx_gui: Some(tx_gui),
         }
     }
 
@@ -116,7 +132,7 @@ impl eframe::App for KiwiGui {
 
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         let texture = match self.state {
-            MascotState::Idle => &self.idle_texture,
+            MascotState::Idle | MascotState::Onboarding { .. } => &self.idle_texture,
             MascotState::Listening => &self.listening_texture,
             MascotState::Thinking => &self.thinking_texture,
             MascotState::Speaking => &self.speaking_texture,
@@ -128,6 +144,34 @@ impl eframe::App for KiwiGui {
             // Fallback text if images fail to load
             ui.heading("Kiwi 🦜");
             ui.label(format!("State: {:?}", self.state));
+        }
+
+        if let MascotState::Onboarding { recorded, is_recording } = self.state {
+            egui::Window::new("Welcome to Kiwi!")
+                .collapsible(false)
+                .resizable(false)
+                .show(ui.ctx(), |ui| {
+                    ui.label("Kiwi needs to learn your wake word.");
+                    ui.label(format!("Samples recorded: {}/3", recorded));
+
+                    if is_recording {
+                        ui.label("Recording... Please speak your wake word.");
+                    } else if recorded < 3 {
+                        if ui.button("Record Sample").clicked() {
+                            #[allow(clippy::collapsible_if)]
+                            if let Some(tx) = &self.tx_gui {
+                                let _ = tx.blocking_send(GuiEvent::RecordSample);
+                            }
+                        }
+                    } else {
+                        #[allow(clippy::collapsible_if)]
+                        if ui.button("Done").clicked() {
+                            if let Some(tx) = &self.tx_gui {
+                                let _ = tx.blocking_send(GuiEvent::DoneOnboarding);
+                            }
+                        }
+                    }
+                });
         }
     }
 
