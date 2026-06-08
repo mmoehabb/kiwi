@@ -41,14 +41,23 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         };
 
         if !has_templates {
-            let _ = gui_tx_clone.send(MascotState::Onboarding { recorded: 0, is_recording: false }).await;
-            let recorded = 0;
+            let _ = gui_tx_clone
+                .send(MascotState::Onboarding {
+                    recorded: 0,
+                    is_recording: false,
+                })
+                .await;
+            let mut recorded = 0;
             while let Some(event) = gui_event_rx.recv().await {
                 match event {
                     GuiEvent::RecordSample => {
-                        let _ = gui_tx_clone.send(MascotState::Onboarding { recorded, is_recording: true }).await;
+                        let _ = gui_tx_clone
+                            .send(MascotState::Onboarding {
+                                recorded,
+                                is_recording: true,
+                            })
+                            .await;
                         let (audio_data, _rate) = tokio::task::spawn_blocking(|| {
-
                             let host = cpal::default_host();
                             use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
                             let device = host.default_input_device().unwrap();
@@ -100,6 +109,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                         let mut engine: tokio::sync::MutexGuard<kiwi::wakeword::WakewordEngine> =
                             wakeword_engine_arc_clone.lock().await;
                         engine.add_template(&processed);
+                        recorded += 1;
+                        let _ = gui_tx_clone
+                            .send(MascotState::Onboarding {
+                                recorded,
+                                is_recording: false,
+                            })
+                            .await;
                     }
                     GuiEvent::DoneOnboarding => {
                         let engine: tokio::sync::MutexGuard<kiwi::wakeword::WakewordEngine> =

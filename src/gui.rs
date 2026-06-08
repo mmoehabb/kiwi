@@ -146,7 +146,11 @@ impl eframe::App for KiwiGui {
             ui.label(format!("State: {:?}", self.state));
         }
 
-        if let MascotState::Onboarding { recorded, is_recording } = self.state {
+        if let MascotState::Onboarding {
+            recorded,
+            is_recording,
+        } = self.state
+        {
             egui::Window::new("Welcome to Kiwi!")
                 .collapsible(false)
                 .resizable(false)

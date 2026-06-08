@@ -41,14 +41,10 @@ use whisper_rs::{WhisperContext, WhisperContextParameters};
 pub struct AudioManager {
     whisper_ctx: Arc<WhisperContext>,
     piper: Arc<Mutex<Piper>>,
-    // TODO: This tiny context is used as a temporary wake word detection mechanism.
-    // Replace this with a native Rust wake word engine (e.g., rustpotter when ML trait bound issues are resolved)
-    _wakeword_ctx: Arc<WhisperContext>,
-    _config: Arc<Configuration>,
 }
 
 impl AudioManager {
-    pub async fn new(config: Arc<Configuration>) -> Result<Self, String> {
+    pub async fn new(_config: Arc<Configuration>) -> Result<Self, String> {
         let base_path = dirs::data_local_dir()
             .unwrap_or_else(|| std::path::PathBuf::from("."))
             .join("kiwi/models");
@@ -80,25 +76,6 @@ impl AudioManager {
 
         // 2. Initialize Whisper for Wake Word (Tiny model for faster inference)
         // TODO: Replace this with a native Rust wake word engine in the future.
-        let wakeword_model_path = base_path.join("ggml-tiny.en.bin");
-        if !wakeword_model_path.exists() {
-            println!(
-                "Downloading temporary Wakeword Whisper model to {}...",
-                wakeword_model_path.display()
-            );
-            Self::download_file(
-                "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-tiny.en.bin",
-                &wakeword_model_path,
-            )
-            .await?;
-            println!("Temporary Wakeword model downloaded successfully.");
-        }
-        let wakeword_ctx = WhisperContext::new_with_params(
-            wakeword_model_path.to_str().unwrap(),
-            WhisperContextParameters::default(),
-        )
-        .map_err(|e| format!("Failed to load temporary Wakeword model: {}", e))?;
-
         // 3. Initialize Piper TTS
         let piper_model_path = base_path.join("en_US-lessac-medium.onnx");
         let piper_config_path = base_path.join("en_US-lessac-medium.onnx.json");
@@ -130,8 +107,6 @@ impl AudioManager {
         Ok(Self {
             whisper_ctx: Arc::new(whisper_ctx),
             piper: Arc::new(Mutex::new(piper)),
-            _wakeword_ctx: Arc::new(wakeword_ctx),
-            _config: config,
         })
     }
 
