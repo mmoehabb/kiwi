@@ -184,6 +184,11 @@ impl eframe::App for KiwiGui {
                         #[allow(clippy::collapsible_if)]
                         if ui.button("Record Sample").clicked() {
                             if let Some(tx) = &self.tx_gui {
+                                // Optimistically update state so we don't send multiple events
+                                self.state = MascotState::Onboarding {
+                                    recorded,
+                                    is_recording: true,
+                                };
                                 let _ = tx.try_send(GuiEvent::RecordSample);
                             }
                         }
