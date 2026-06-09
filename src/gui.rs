@@ -164,14 +164,14 @@ impl eframe::App for KiwiGui {
                         if ui.button("Record Sample").clicked() {
                             #[allow(clippy::collapsible_if)]
                             if let Some(tx) = &self.tx_gui {
-                                let _ = tx.blocking_send(GuiEvent::RecordSample);
+                                let _ = tx.try_send(GuiEvent::RecordSample);
                             }
                         }
                     } else {
                         #[allow(clippy::collapsible_if)]
                         if ui.button("Done").clicked() {
                             if let Some(tx) = &self.tx_gui {
-                                let _ = tx.blocking_send(GuiEvent::DoneOnboarding);
+                                let _ = tx.try_send(GuiEvent::DoneOnboarding);
                             }
                         }
                     }
