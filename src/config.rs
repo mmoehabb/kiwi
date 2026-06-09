@@ -9,10 +9,13 @@ use std::path::PathBuf;
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct PermissionsConfig {
     /// List of allowed shell commands (can include wildcards like `git *`).
+    #[serde(default)]
     pub allowed_commands: Vec<String>,
     /// List of directories Kiwi is allowed to read from.
+    #[serde(default)]
     pub allowed_read_paths: Vec<String>,
     /// List of directories Kiwi is allowed to write to.
+    #[serde(default)]
     pub allowed_write_paths: Vec<String>,
 }
 
@@ -86,6 +89,18 @@ impl Configuration {
         if !path.exists() {
             fs::create_dir_all(&path).map_err(|e| format!("Failed to create config dir: {}", e))?;
         }
+        Ok(path)
+    }
+
+    pub fn wakeword_templates_path() -> Result<PathBuf, String> {
+        let mut path = dirs::data_local_dir().ok_or("Could not find user local data directory")?;
+        path.push("kiwi");
+        path.push("models");
+        if !path.exists() {
+            std::fs::create_dir_all(&path)
+                .map_err(|e| format!("Failed to create models dir: {}", e))?;
+        }
+        path.push("wakeword_templates.bin");
         Ok(path)
     }
 

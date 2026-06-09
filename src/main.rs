@@ -1,9 +1,10 @@
-use kiwi::audio::{AudioManager, SpeechToText, TextToSpeech, WakeWordEngine};
+use kiwi::audio::{AudioManager, SpeechToText, TextToSpeech, WakeWordListener};
 use kiwi::config::Configuration;
 use kiwi::event::KiwiEvent;
-use kiwi::gui::{KiwiGui, MascotState};
+use kiwi::gui::{GuiEvent, KiwiGui, MascotState};
 use kiwi::interruption::InterruptionDetector;
 use kiwi::llm::{LlmEngine, LocalLlm};
+use kiwi::wakeword::WakewordEngine;
 use rodio::{OutputStream, Sink};
 use std::sync::Arc;
 use tokio::sync::mpsc;
@@ -13,6 +14,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("Starting Kiwi...");
 
     let config = Arc::new(Configuration::new());
+    let wakeword_path = Configuration::wakeword_templates_path().unwrap();
+    let wakeword_engine = WakewordEngine::new(wakeword_path, config.app.wake_word_sensitivity);
+    let wakeword_engine_arc = Arc::new(tokio::sync::Mutex::new(wakeword_engine));
 
     println!("Initializing LLM Engine with Ollama...");
     let mut llm = LocalLlm::new(config.clone());
@@ -25,10 +29,142 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let (gui_tx, gui_rx) = mpsc::channel::<MascotState>(32);
     let audio_mgr_clone = audio_mgr.clone();
 
+    let (gui_event_tx, mut gui_event_rx) = tokio::sync::mpsc::channel(10);
+    let gui_event_tx_clone = gui_event_tx.clone();
+    let wakeword_engine_arc_clone = wakeword_engine_arc.clone();
+    let gui_tx_clone = gui_tx.clone();
     tokio::spawn(async move {
+        let has_templates = {
+            let engine: tokio::sync::MutexGuard<kiwi::wakeword::WakewordEngine> =
+                wakeword_engine_arc_clone.lock().await;
+            engine.has_templates()
+        };
+
+        if !has_templates {
+            let _ = gui_tx_clone
+                .send(MascotState::Onboarding {
+                    recorded: 0,
+                    is_recording: false,
+                })
+                .await;
+            let mut recorded = 0;
+            let mut cached_raw_audio: Vec<Vec<f32>> = Vec::new();
+            while let Some(event) = gui_event_rx.recv().await {
+                match event {
+                    GuiEvent::RecordSample => {
+                        let _ = gui_tx_clone
+                            .send(MascotState::Onboarding {
+                                recorded,
+                                is_recording: true,
+                            })
+                            .await;
+                        let (audio_data, _rate) = tokio::task::spawn_blocking(|| {
+                            let host = cpal::default_host();
+                            use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
+                            let device = host.default_input_device().unwrap();
+                            let conf = device.default_input_config().unwrap();
+                            let channels = conf.channels();
+                            let rb = ringbuf::HeapRb::<f32>::new(conf.sample_rate().0 as usize * 5);
+                            let (mut prod, mut cons) = ringbuf::traits::Split::split(rb);
+                            let stream = match conf.sample_format() {
+                                cpal::SampleFormat::F32 => device
+                                    .build_input_stream(
+                                        &conf.clone().into(),
+                                        move |data: &[f32], _| {
+                                            for frame in data.chunks(channels as usize) {
+                                                let mono_sample =
+                                                    frame.iter().sum::<f32>() / channels as f32;
+                                                let _ = ringbuf::traits::Producer::try_push(
+                                                    &mut prod,
+                                                    mono_sample,
+                                                );
+                                            }
+                                        },
+                                        |err| eprintln!("error: {}", err),
+                                        None,
+                                    )
+                                    .unwrap(),
+                                _ => panic!("Unsupported format"),
+                            };
+                            stream.play().unwrap();
+                            std::thread::sleep(std::time::Duration::from_millis(2000));
+                            stream.pause().unwrap();
+                            let mut buf = Vec::new();
+                            while let Some(s) = ringbuf::traits::Consumer::try_pop(&mut cons) {
+                                buf.push(s);
+                            }
+                            (buf, conf.sample_rate().0)
+                        })
+                        .await
+                        .unwrap();
+                        let processed = if _rate != 16000 {
+                            use dasp::{Signal, interpolate::linear::Linear, signal};
+                            let mut sig = signal::from_iter(audio_data.clone());
+                            let interp = Linear::new(sig.next(), sig.next());
+                            sig.from_hz_to_hz(interp, _rate as f64, 16000.0)
+                                .take((audio_data.len() as f64 * (16000.0 / _rate as f64)) as usize)
+                                .collect()
+                        } else {
+                            audio_data
+                        };
+
+                        cached_raw_audio.push(processed.clone());
+                        let mut engine: tokio::sync::MutexGuard<kiwi::wakeword::WakewordEngine> =
+                            wakeword_engine_arc_clone.lock().await;
+                        engine.add_template(&processed);
+                        recorded += 1;
+                        let _ = gui_tx_clone
+                            .send(MascotState::Onboarding {
+                                recorded,
+                                is_recording: false,
+                            })
+                            .await;
+                    }
+                    GuiEvent::PlaySample(idx) => {
+                        if idx < cached_raw_audio.len() {
+                            let audio = cached_raw_audio[idx].clone();
+                            tokio::task::spawn_blocking(move || {
+                                let (_stream, stream_handle) =
+                                    rodio::OutputStream::try_default().unwrap();
+                                let sink = rodio::Sink::try_new(&stream_handle).unwrap();
+                                let buffer = rodio::buffer::SamplesBuffer::new(1, 16000, audio);
+                                sink.append(buffer);
+                                sink.sleep_until_end();
+                            });
+                        }
+                    }
+                    GuiEvent::DeleteSample(idx) => {
+                        if idx < cached_raw_audio.len() {
+                            cached_raw_audio.remove(idx);
+                            let mut engine: tokio::sync::MutexGuard<
+                                kiwi::wakeword::WakewordEngine,
+                            > = wakeword_engine_arc_clone.lock().await;
+                            engine.remove_template(idx);
+                            recorded -= 1;
+                            let _ = gui_tx_clone
+                                .send(MascotState::Onboarding {
+                                    recorded,
+                                    is_recording: false,
+                                })
+                                .await;
+                        }
+                    }
+                    GuiEvent::DoneOnboarding => {
+                        let engine = wakeword_engine_arc_clone.lock().await;
+                        let _ = engine.save_templates();
+                        let _ = gui_tx_clone.send(MascotState::Idle).await;
+                        break;
+                    }
+                }
+            }
+        }
+
         println!("Background daemon started. Listening for wake word...");
         loop {
-            if let Err(e) = audio_mgr_clone.wait_for_wake_word().await {
+            if let Err(e) = audio_mgr_clone
+                .wait_for_wake_word(wakeword_engine_arc_clone.clone())
+                .await
+            {
                 eprintln!("Wake word error: {}", e);
                 continue;
             }
@@ -218,7 +354,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     eframe::run_native(
         "Kiwi",
         options,
-        Box::new(|_cc| Ok(Box::new(KiwiGui::new(gui_rx)))),
+        Box::new(move |_cc| Ok(Box::new(KiwiGui::new(gui_rx, gui_event_tx_clone)))),
     )?;
 
     Ok(())
