@@ -163,11 +163,13 @@ impl eframe::App for KiwiGui {
                     for i in 0..recorded {
                         ui.horizontal(|ui| {
                             ui.label(format!("Sample {}", i + 1));
+                            #[allow(clippy::collapsible_if)]
                             if ui.button("▶ Play").clicked() {
                                 if let Some(tx) = &self.tx_gui {
                                     let _ = tx.try_send(GuiEvent::PlaySample(i));
                                 }
                             }
+                            #[allow(clippy::collapsible_if)]
                             if ui.button("🗑 Delete").clicked() {
                                 if let Some(tx) = &self.tx_gui {
                                     let _ = tx.try_send(GuiEvent::DeleteSample(i));
@@ -179,12 +181,15 @@ impl eframe::App for KiwiGui {
                     if is_recording {
                         ui.label("Recording... Please speak your wake word.");
                     } else {
+                        #[allow(clippy::collapsible_if)]
                         if ui.button("Record Sample").clicked() {
                             if let Some(tx) = &self.tx_gui {
                                 let _ = tx.try_send(GuiEvent::RecordSample);
                             }
                         }
+                        #[allow(clippy::collapsible_if)]
                         if recorded >= 3 {
+                            #[allow(clippy::collapsible_if)]
                             if ui.button("Done").clicked() {
                                 if let Some(tx) = &self.tx_gui {
                                     let _ = tx.try_send(GuiEvent::DoneOnboarding);
