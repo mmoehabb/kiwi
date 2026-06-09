@@ -9,10 +9,13 @@ use std::path::PathBuf;
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct PermissionsConfig {
     /// List of allowed shell commands (can include wildcards like `git *`).
+    #[serde(default)]
     pub allowed_commands: Vec<String>,
     /// List of directories Kiwi is allowed to read from.
+    #[serde(default)]
     pub allowed_read_paths: Vec<String>,
     /// List of directories Kiwi is allowed to write to.
+    #[serde(default)]
     pub allowed_write_paths: Vec<String>,
 }
 

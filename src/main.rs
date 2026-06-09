@@ -63,7 +63,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                             let device = host.default_input_device().unwrap();
                             let conf = device.default_input_config().unwrap();
                             let channels = conf.channels();
-                            let rb = ringbuf::HeapRb::<f32>::new(16000 * 2);
+                            let rb = ringbuf::HeapRb::<f32>::new(conf.sample_rate().0 as usize * 5);
                             let (mut prod, mut cons) = ringbuf::traits::Split::split(rb);
                             let stream = match conf.sample_format() {
                                 cpal::SampleFormat::F32 => device
