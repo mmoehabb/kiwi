@@ -48,6 +48,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 })
                 .await;
             let mut recorded = 0;
+            let mut cached_raw_audio: Vec<Vec<f32>> = Vec::new();
             while let Some(event) = gui_event_rx.recv().await {
                 match event {
                     GuiEvent::RecordSample => {
@@ -106,6 +107,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                         } else {
                             audio_data
                         };
+
+                        cached_raw_audio.push(processed.clone());
                         let mut engine: tokio::sync::MutexGuard<kiwi::wakeword::WakewordEngine> =
                             wakeword_engine_arc_clone.lock().await;
                         engine.add_template(&processed);
@@ -117,9 +120,37 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                             })
                             .await;
                     }
+                    GuiEvent::PlaySample(idx) => {
+                        if idx < cached_raw_audio.len() {
+                            let audio = cached_raw_audio[idx].clone();
+                            tokio::task::spawn_blocking(move || {
+                                let (_stream, stream_handle) =
+                                    rodio::OutputStream::try_default().unwrap();
+                                let sink = rodio::Sink::try_new(&stream_handle).unwrap();
+                                let buffer = rodio::buffer::SamplesBuffer::new(1, 16000, audio);
+                                sink.append(buffer);
+                                sink.sleep_until_end();
+                            });
+                        }
+                    }
+                    GuiEvent::DeleteSample(idx) => {
+                        if idx < cached_raw_audio.len() {
+                            cached_raw_audio.remove(idx);
+                            let mut engine: tokio::sync::MutexGuard<
+                                kiwi::wakeword::WakewordEngine,
+                            > = wakeword_engine_arc_clone.lock().await;
+                            engine.remove_template(idx);
+                            recorded -= 1;
+                            let _ = gui_tx_clone
+                                .send(MascotState::Onboarding {
+                                    recorded,
+                                    is_recording: false,
+                                })
+                                .await;
+                        }
+                    }
                     GuiEvent::DoneOnboarding => {
-                        let engine: tokio::sync::MutexGuard<kiwi::wakeword::WakewordEngine> =
-                            wakeword_engine_arc_clone.lock().await;
+                        let engine = wakeword_engine_arc_clone.lock().await;
                         let _ = engine.save_templates();
                         let _ = gui_tx_clone.send(MascotState::Idle).await;
                         break;

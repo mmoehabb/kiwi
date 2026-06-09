@@ -52,6 +52,8 @@ pub struct KiwiGui {
 pub enum GuiEvent {
     RecordSample,
     DoneOnboarding,
+    PlaySample(usize),
+    DeleteSample(usize),
 }
 
 impl KiwiGui {
@@ -158,20 +160,35 @@ impl eframe::App for KiwiGui {
                     ui.label("Kiwi needs to learn your wake word.");
                     ui.label(format!("Samples recorded: {}/3", recorded));
 
+                    for i in 0..recorded {
+                        ui.horizontal(|ui| {
+                            ui.label(format!("Sample {}", i + 1));
+                            if ui.button("▶ Play").clicked() {
+                                if let Some(tx) = &self.tx_gui {
+                                    let _ = tx.try_send(GuiEvent::PlaySample(i));
+                                }
+                            }
+                            if ui.button("🗑 Delete").clicked() {
+                                if let Some(tx) = &self.tx_gui {
+                                    let _ = tx.try_send(GuiEvent::DeleteSample(i));
+                                }
+                            }
+                        });
+                    }
+
                     if is_recording {
                         ui.label("Recording... Please speak your wake word.");
-                    } else if recorded < 3 {
+                    } else {
                         if ui.button("Record Sample").clicked() {
-                            #[allow(clippy::collapsible_if)]
                             if let Some(tx) = &self.tx_gui {
                                 let _ = tx.try_send(GuiEvent::RecordSample);
                             }
                         }
-                    } else {
-                        #[allow(clippy::collapsible_if)]
-                        if ui.button("Done").clicked() {
-                            if let Some(tx) = &self.tx_gui {
-                                let _ = tx.try_send(GuiEvent::DoneOnboarding);
+                        if recorded >= 3 {
+                            if ui.button("Done").clicked() {
+                                if let Some(tx) = &self.tx_gui {
+                                    let _ = tx.try_send(GuiEvent::DoneOnboarding);
+                                }
                             }
                         }
                     }

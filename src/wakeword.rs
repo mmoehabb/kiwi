@@ -61,6 +61,12 @@ impl WakewordEngine {
         self.templates.clear();
     }
 
+    pub fn remove_template(&mut self, index: usize) {
+        if index < self.templates.len() {
+            self.templates.remove(index);
+        }
+    }
+
     pub fn detect(&self, audio: &[f32]) -> bool {
         if self.templates.is_empty() {
             return false;
