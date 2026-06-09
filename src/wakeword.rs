@@ -72,6 +72,17 @@ impl WakewordEngine {
             return false;
         }
 
+        // Basic silence detection: if audio is too quiet, it's not a wake word.
+        let mut sum_squares = 0.0;
+        for &sample in audio {
+            sum_squares += sample * sample;
+        }
+        let rms = (sum_squares / audio.len() as f32).sqrt();
+        if rms < 0.01 {
+            // Magic threshold for absolute silence
+            return false;
+        }
+
         let input_mfcc = extract_mfcc(audio);
         if input_mfcc.is_empty() {
             return false;
@@ -96,7 +107,12 @@ impl WakewordEngine {
         // E.g., higher sensitivity = lower threshold = requires closer match.
         // Note: sensitivity usually goes the other way (higher = easier to trigger),
         // so we invert the threshold logic.
-        let threshold = (1.0 - self.sensitivity.clamp(0.0, 0.99)) * 500.0; // Arbitrary scale factor
+        let threshold = (1.0 - self.sensitivity.clamp(0.0, 0.99)) * 50.0; // Scaled down to prevent false positives
+
+        println!(
+            "Wakeword engine evaluated audio: dist = {:.2}, threshold = {:.2}",
+            min_distance, threshold
+        );
 
         min_distance < threshold
     }
