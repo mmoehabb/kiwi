@@ -176,10 +176,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             let wake_word_prompt = config_daemon.app.wake_word.clone();
             let wake_response = match llm_daemon.generate(&wake_word_prompt).await {
                 Ok(res) => res,
-                Err(e) => {
-                    eprintln!("Error generating response for wake word: {}", e);
-                    "How can I help you?".to_string()
-                }
+                Err(e) => panic!("Error generating response for wake word: {}", e),
             };
 
             match audio_mgr_clone.speak(&wake_response).await {
@@ -205,10 +202,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
                             let bye_response = match llm_clone.generate("bye").await {
                                 Ok(res) => res,
-                                Err(e) => {
-                                    eprintln!("Error generating response for bye: {}", e);
-                                    "I'll be here when you need me.".to_string()
-                                }
+                                Err(e) => panic!("Error generating response for bye: {}", e),
                             };
 
                             match audio_mgr_clone.speak(&bye_response).await {
