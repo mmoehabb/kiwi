@@ -33,6 +33,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let gui_event_tx_clone = gui_event_tx.clone();
     let wakeword_engine_arc_clone = wakeword_engine_arc.clone();
     let gui_tx_clone = gui_tx.clone();
+    let llm_daemon = llm.clone();
+    let config_daemon = config.clone();
     tokio::spawn(async move {
         let has_templates = {
             let engine: tokio::sync::MutexGuard<kiwi::wakeword::WakewordEngine> =
@@ -171,7 +173,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             println!("Wake word detected!");
             let _ = event_tx.send(KiwiEvent::WakeWordDetected).await;
 
-            match audio_mgr_clone.speak("How can I help you?").await {
+            let wake_word_prompt = config_daemon.app.wake_word.clone();
+            let wake_response = match llm_daemon.generate(&wake_word_prompt).await {
+                Ok(res) => res,
+                Err(e) => {
+                    eprintln!("Error generating response for wake word: {}", e);
+                    "How can I help you?".to_string()
+                }
+            };
+
+            match audio_mgr_clone.speak(&wake_response).await {
                 Ok(audio_buffer) => {
                     let (_stream, stream_handle) = OutputStream::try_default().unwrap();
                     let sink = Sink::try_new(&stream_handle).unwrap();
@@ -182,7 +193,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 Err(e) => eprintln!("TTS Error for wake prompt: {}", e),
             }
 
-            let llm_clone = llm.clone();
+            let llm_clone = llm_daemon.clone();
 
             loop {
                 let _ = event_tx.send(KiwiEvent::WakeWordDetected).await;
@@ -191,10 +202,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     Ok(text) => {
                         if text.is_empty() {
                             println!("Conversation finished.");
-                            match audio_mgr_clone
-                                .speak("I'll be here when you need me.")
-                                .await
-                            {
+
+                            let bye_response = match llm_clone.generate("bye").await {
+                                Ok(res) => res,
+                                Err(e) => {
+                                    eprintln!("Error generating response for bye: {}", e);
+                                    "I'll be here when you need me.".to_string()
+                                }
+                            };
+
+                            match audio_mgr_clone.speak(&bye_response).await {
                                 Ok(audio_buffer) => {
                                     let (_stream, stream_handle) =
                                         OutputStream::try_default().unwrap();
