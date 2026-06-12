@@ -76,9 +76,8 @@ impl AudioManager {
         // 2. Initialize Whisper for Wake Word (Tiny model for faster inference)
         // TODO: Replace this with a native Rust wake word engine in the future.
         // 3. Initialize Kokoro TTS
-        let kokoro_model_path = base_path.join("kokoro-v0_19.onnx");
-        let voices_dir = base_path.join("voices");
-        let default_voice_path = voices_dir.join("af_heart.bin");
+        let kokoro_model_path = base_path.join("kokoro-v1.0.onnx");
+        let voices_path = base_path.join("voices-v1.0.bin");
 
         if !kokoro_model_path.exists() {
             println!(
@@ -86,28 +85,20 @@ impl AudioManager {
                 kokoro_model_path.display()
             );
             Self::download_file(
-                 "https://github.com/thewh1teagle/kokoro-onnx/releases/download/model-files/kokoro-v0_19.onnx",
+                 "https://github.com/thewh1teagle/kokoro-onnx/releases/download/model-files-v1.0/kokoro-v1.0.onnx",
                  &kokoro_model_path,
              ).await?;
         }
 
-        if !voices_dir.exists() {
-            std::fs::create_dir_all(&voices_dir)
-                .map_err(|e| format!("Failed to create voices directory: {}", e))?;
-        }
-
-        if !default_voice_path.exists() {
-            println!(
-                "Downloading default Kokoro voice to {}...",
-                default_voice_path.display()
-            );
+        if !voices_path.exists() {
+            println!("Downloading Kokoro voices to {}...", voices_path.display());
             Self::download_file(
-                 "https://github.com/thewh1teagle/kokoro-onnx/releases/download/model-files/af_heart.bin",
-                 &default_voice_path,
+                 "https://github.com/thewh1teagle/kokoro-onnx/releases/download/model-files-v1.0/voices-v1.0.bin",
+                 &voices_path,
              ).await?;
         }
 
-        let kokoro = KokoroTts::new(&kokoro_model_path, &voices_dir)
+        let kokoro = KokoroTts::new(&kokoro_model_path, &voices_path)
             .await
             .map_err(|e| format!("Failed to load Kokoro model: {:?}", e))?;
 
