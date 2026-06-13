@@ -40,7 +40,7 @@ impl LocalLlm {
     }
 
     async fn internal_generate(&self, prompt: &str, is_structured: bool) -> Result<String, String> {
-        let url = "http://localhost:11434/api/generate";
+        let url = &self.config.app.llm_url;
 
         let format = if is_structured { Some("json") } else { None };
 
