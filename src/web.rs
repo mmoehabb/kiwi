@@ -21,37 +21,35 @@ pub struct SearchResult {
     pub snippet: String,
 }
 
+use crate::config::Configuration;
 use reqwest::Client;
 use scraper::{Html, Selector};
+use std::sync::Arc;
 
 /// The main struct handling outgoing web requests.
 pub struct WebClient {
     client: Client,
-}
-
-impl Default for WebClient {
-    fn default() -> Self {
-        Self::new()
-    }
+    config: Arc<Configuration>,
 }
 
 impl WebClient {
-    pub fn new() -> Self {
+    pub fn new(config: Arc<Configuration>) -> Self {
         let client = Client::builder()
             .user_agent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36")
             .build()
             .unwrap_or_default();
-        Self { client }
+        Self { client, config }
     }
 }
 
 #[async_trait::async_trait]
 impl WebSearcher for WebClient {
     async fn search(&self, query: &str) -> Result<Vec<SearchResult>, String> {
-        let url = format!(
-            "https://html.duckduckgo.com/html/?q={}",
-            urlencoding::encode(query)
-        );
+        let url = self
+            .config
+            .app
+            .search_url_template
+            .replace("{}", &urlencoding::encode(query));
 
         let response = self
             .client

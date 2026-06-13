@@ -40,10 +40,11 @@ use whisper_rs::{WhisperContext, WhisperContextParameters};
 pub struct AudioManager {
     whisper_ctx: Arc<WhisperContext>,
     kokoro: Arc<KokoroTts>,
+    tts_voice_name: String,
 }
 
 impl AudioManager {
-    pub async fn new(_config: Arc<Configuration>) -> Result<Self, String> {
+    pub async fn new(config: Arc<Configuration>) -> Result<Self, String> {
         let base_path = dirs::data_local_dir()
             .unwrap_or_else(|| std::path::PathBuf::from("."))
             .join("kiwi/models");
@@ -54,17 +55,20 @@ impl AudioManager {
         }
 
         // 1. Initialize Whisper STT (Base model)
-        let whisper_model_path = base_path.join("ggml-base.en.bin");
+        let whisper_model_path = base_path.join(
+            config
+                .app
+                .stt_model_url
+                .split('/')
+                .next_back()
+                .unwrap_or("ggml-base.en.bin"),
+        );
         if !whisper_model_path.exists() {
             println!(
                 "Downloading Whisper model to {}...",
                 whisper_model_path.display()
             );
-            Self::download_file(
-                "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base.en.bin",
-                &whisper_model_path,
-            )
-            .await?;
+            Self::download_file(&config.app.stt_model_url, &whisper_model_path).await?;
             println!("Whisper model downloaded successfully.");
         }
         let whisper_ctx = WhisperContext::new_with_params(
@@ -76,19 +80,23 @@ impl AudioManager {
         // 2. Initialize Whisper for Wake Word (Tiny model for faster inference)
         // TODO: Replace this with a native Rust wake word engine in the future.
         // 3. Initialize Kokoro TTS
-        let kokoro_model_path = base_path.join("kokoro-model.onnx");
+        let kokoro_model_path = base_path.join(
+            config
+                .app
+                .tts_model_url
+                .split('/')
+                .next_back()
+                .unwrap_or("kokoro-model.onnx"),
+        );
         let voices_dir = base_path.join("voices");
-        let default_voice_path = voices_dir.join("af_heart.bin");
+        let default_voice_path = voices_dir.join(format!("{}.bin", config.app.tts_voice_name));
 
         if !kokoro_model_path.exists() {
             println!(
                 "Downloading Kokoro model to {}...",
                 kokoro_model_path.display()
             );
-            Self::download_file(
-                 "https://huggingface.co/onnx-community/Kokoro-82M-v1.0-ONNX/resolve/main/onnx/model.onnx",
-                 &kokoro_model_path,
-             ).await?;
+            Self::download_file(&config.app.tts_model_url, &kokoro_model_path).await?;
         }
 
         if !voices_dir.exists() {
@@ -101,10 +109,7 @@ impl AudioManager {
                 "Downloading default Kokoro voice to {}...",
                 default_voice_path.display()
             );
-            Self::download_file(
-                 "https://huggingface.co/onnx-community/Kokoro-82M-v1.0-ONNX/resolve/main/voices/af_heart.bin",
-                 &default_voice_path,
-             ).await?;
+            Self::download_file(&config.app.tts_voice_url, &default_voice_path).await?;
         }
 
         let kokoro = KokoroTts::new(&kokoro_model_path, &voices_dir)
@@ -114,6 +119,7 @@ impl AudioManager {
         Ok(Self {
             whisper_ctx: Arc::new(whisper_ctx),
             kokoro: Arc::new(kokoro),
+            tts_voice_name: config.app.tts_voice_name.clone(),
         })
     }
 
@@ -445,7 +451,7 @@ impl TextToSpeech for AudioManager {
 
         let (audio_data, _duration) = self
             .kokoro
-            .synth(text_owned, "af_heart")
+            .synth(text_owned, &self.tts_voice_name)
             .await
             .map_err(|e| format!("Kokoro TTS error: {:?}", e))?;
 
