@@ -2,7 +2,7 @@ use async_trait::async_trait;
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use dasp::{Signal, interpolate::linear::Linear, signal};
 use futures_util::StreamExt;
-use piper_rs::Piper;
+use kokoro_en::KokoroTts;
 
 #[async_trait::async_trait]
 pub trait WakeWordListener {
@@ -34,13 +34,12 @@ use std::fs::File;
 use std::io::Write;
 use std::sync::Arc;
 use std::time::Duration;
-use tokio::sync::Mutex;
 use whisper_rs::{WhisperContext, WhisperContextParameters};
 
 /// The unified manager for all audio operations.
 pub struct AudioManager {
     whisper_ctx: Arc<WhisperContext>,
-    piper: Arc<Mutex<Piper>>,
+    kokoro: Arc<KokoroTts>,
 }
 
 impl AudioManager {
@@ -76,37 +75,45 @@ impl AudioManager {
 
         // 2. Initialize Whisper for Wake Word (Tiny model for faster inference)
         // TODO: Replace this with a native Rust wake word engine in the future.
-        // 3. Initialize Piper TTS
-        let piper_model_path = base_path.join("en_US-lessac-medium.onnx");
-        let piper_config_path = base_path.join("en_US-lessac-medium.onnx.json");
+        // 3. Initialize Kokoro TTS
+        let kokoro_model_path = base_path.join("kokoro-model.onnx");
+        let voices_dir = base_path.join("voices");
+        let default_voice_path = voices_dir.join("af_heart.bin");
 
-        if !piper_model_path.exists() {
+        if !kokoro_model_path.exists() {
             println!(
-                "Downloading Piper model to {}...",
-                piper_model_path.display()
+                "Downloading Kokoro model to {}...",
+                kokoro_model_path.display()
             );
             Self::download_file(
-                 "https://huggingface.co/rhasspy/piper-voices/resolve/main/en/en_US/lessac/medium/en_US-lessac-medium.onnx",
-                 &piper_model_path,
-             ).await?;
-        }
-        if !piper_config_path.exists() {
-            println!(
-                "Downloading Piper config to {}...",
-                piper_config_path.display()
-            );
-            Self::download_file(
-                 "https://huggingface.co/rhasspy/piper-voices/resolve/main/en/en_US/lessac/medium/en_US-lessac-medium.onnx.json",
-                 &piper_config_path,
+                 "https://huggingface.co/onnx-community/Kokoro-82M-v1.0-ONNX/resolve/main/onnx/model.onnx",
+                 &kokoro_model_path,
              ).await?;
         }
 
-        let piper = Piper::new(&piper_model_path, &piper_config_path)
-            .map_err(|e| format!("Failed to load Piper model: {}", e))?;
+        if !voices_dir.exists() {
+            std::fs::create_dir_all(&voices_dir)
+                .map_err(|e| format!("Failed to create voices directory: {}", e))?;
+        }
+
+        if !default_voice_path.exists() {
+            println!(
+                "Downloading default Kokoro voice to {}...",
+                default_voice_path.display()
+            );
+            Self::download_file(
+                 "https://huggingface.co/onnx-community/Kokoro-82M-v1.0-ONNX/resolve/main/voices/af_heart.bin",
+                 &default_voice_path,
+             ).await?;
+        }
+
+        let kokoro = KokoroTts::new(&kokoro_model_path, &voices_dir)
+            .await
+            .map_err(|e| format!("Failed to load Kokoro model: {:?}", e))?;
 
         Ok(Self {
             whisper_ctx: Arc::new(whisper_ctx),
-            piper: Arc::new(Mutex::new(piper)),
+            kokoro: Arc::new(kokoro),
         })
     }
 
@@ -434,19 +441,13 @@ impl SpeechToText for AudioManager {
 #[async_trait::async_trait]
 impl TextToSpeech for AudioManager {
     async fn speak(&self, text: &str) -> Result<Vec<f32>, String> {
-        let piper = self.piper.clone();
         let text_owned = text.to_string();
 
-        let audio_data = tokio::task::spawn_blocking(move || {
-            let mut piper_guard = piper.blocking_lock();
-            let (audio_data, _sample_rate) = piper_guard
-                .create(&text_owned, false, None, None, None, None)
-                .map_err(|e| e.to_string())?;
-
-            Ok::<Vec<f32>, String>(audio_data)
-        })
-        .await
-        .map_err(|e| e.to_string())??;
+        let (audio_data, _duration) = self
+            .kokoro
+            .synth(text_owned, "af_heart")
+            .await
+            .map_err(|e| format!("Kokoro TTS error: {:?}", e))?;
 
         Ok(audio_data)
     }

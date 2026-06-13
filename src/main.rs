@@ -183,7 +183,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 Ok(audio_buffer) => {
                     let (_stream, stream_handle) = OutputStream::try_default().unwrap();
                     let sink = Sink::try_new(&stream_handle).unwrap();
-                    let buffer = rodio::buffer::SamplesBuffer::new(1, 22050, audio_buffer);
+                    let buffer = rodio::buffer::SamplesBuffer::new(1, 24000, audio_buffer);
                     sink.append(buffer);
                     sink.sleep_until_end();
                 }
@@ -211,7 +211,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                                         OutputStream::try_default().unwrap();
                                     let sink = Sink::try_new(&stream_handle).unwrap();
                                     let buffer =
-                                        rodio::buffer::SamplesBuffer::new(1, 22050, audio_buffer);
+                                        rodio::buffer::SamplesBuffer::new(1, 24000, audio_buffer);
                                     sink.append(buffer);
                                     sink.sleep_until_end();
                                 }
@@ -262,7 +262,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                                         let sink = Sink::try_new(&stream_handle).unwrap();
                                         let buffer = rodio::buffer::SamplesBuffer::new(
                                             1,
-                                            22050,
+                                            24000,
                                             audio_buffer,
                                         );
                                         sink.append(buffer);
