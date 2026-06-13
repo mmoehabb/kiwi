@@ -2,7 +2,7 @@ use async_trait::async_trait;
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use dasp::{Signal, interpolate::linear::Linear, signal};
 use futures_util::StreamExt;
-use kokoro_en::KokoroTts;
+use pocket_tts::TTSModel;
 
 #[async_trait::async_trait]
 pub trait WakeWordListener {
@@ -39,8 +39,8 @@ use whisper_rs::{WhisperContext, WhisperContextParameters};
 /// The unified manager for all audio operations.
 pub struct AudioManager {
     whisper_ctx: Arc<WhisperContext>,
-    kokoro: Arc<KokoroTts>,
-    tts_voice_name: String,
+    pocket_model: Arc<TTSModel>,
+    voice_state: Arc<pocket_tts::ModelState>,
 }
 
 impl AudioManager {
@@ -79,47 +79,70 @@ impl AudioManager {
 
         // 2. Initialize Whisper for Wake Word (Tiny model for faster inference)
         // TODO: Replace this with a native Rust wake word engine in the future.
-        // 3. Initialize Kokoro TTS
-        let kokoro_model_path = base_path.join(
-            config
-                .app
-                .tts_model_url
-                .split('/')
-                .next_back()
-                .unwrap_or("kokoro-model.onnx"),
-        );
-        let voices_dir = base_path.join("voices");
-        let default_voice_path = voices_dir.join(format!("{}.bin", config.app.tts_voice_name));
+        // 3. Initialize Pocket TTS (non-gated repo)
+        let weights_path = base_path.join("pocket-tts-weights.safetensors");
+        let tokenizer_path = base_path.join("pocket-tts-tokenizer.model");
 
-        if !kokoro_model_path.exists() {
-            println!(
-                "Downloading Kokoro model to {}...",
-                kokoro_model_path.display()
-            );
-            Self::download_file(&config.app.tts_model_url, &kokoro_model_path).await?;
+        if !weights_path.exists() {
+            println!("Downloading Pocket TTS weights...");
+            Self::download_file(
+                "https://huggingface.co/kyutai/pocket-tts-without-voice-cloning/resolve/main/tts_b6369a24.safetensors",
+                &weights_path,
+            ).await?;
+            println!("Pocket TTS weights downloaded.");
         }
 
-        if !voices_dir.exists() {
-            std::fs::create_dir_all(&voices_dir)
-                .map_err(|e| format!("Failed to create voices directory: {}", e))?;
+        if !tokenizer_path.exists() {
+            println!("Downloading Pocket TTS tokenizer...");
+            Self::download_file(
+                "https://huggingface.co/kyutai/pocket-tts-without-voice-cloning/resolve/main/tokenizer.model",
+                &tokenizer_path,
+            ).await?;
+            println!("Pocket TTS tokenizer downloaded.");
         }
 
-        if !default_voice_path.exists() {
-            println!(
-                "Downloading default Kokoro voice to {}...",
-                default_voice_path.display()
-            );
-            Self::download_file(&config.app.tts_voice_url, &default_voice_path).await?;
-        }
+        let config_yaml = include_str!("pocket_tts_config.yaml");
+        let weights_bytes = std::fs::read(&weights_path)
+            .map_err(|e| format!("Failed to read Pocket TTS weights: {}", e))?;
+        let tokenizer_bytes = std::fs::read(&tokenizer_path)
+            .map_err(|e| format!("Failed to read Pocket TTS tokenizer: {}", e))?;
 
-        let kokoro = KokoroTts::new(&kokoro_model_path, &voices_dir)
-            .await
-            .map_err(|e| format!("Failed to load Kokoro model: {:?}", e))?;
+        let pocket_model =
+            TTSModel::load_from_bytes(config_yaml.as_bytes(), &weights_bytes, &tokenizer_bytes)
+                .map_err(|e| format!("Failed to load Pocket TTS model: {:?}", e))?;
+
+        let voice_embedding_path = base_path.join("embeddings");
+        let voice_path = if config.app.tts_voice_path.is_empty() {
+            let cosette_path = voice_embedding_path.join("cosette.safetensors");
+            if !cosette_path.exists() {
+                std::fs::create_dir_all(&voice_embedding_path)
+                    .map_err(|e| format!("Failed to create embeddings dir: {}", e))?;
+                println!("Downloading Pocket TTS voice 'cosette'...");
+                Self::download_file(
+                    "https://huggingface.co/kyutai/pocket-tts-without-voice-cloning/resolve/main/embeddings/cosette.safetensors",
+                    &cosette_path,
+                ).await?;
+                println!("Voice 'cosette' downloaded.");
+            }
+            cosette_path
+        } else {
+            std::path::PathBuf::from(&config.app.tts_voice_path)
+        };
+
+        let voice_state = if voice_path.extension().is_some_and(|e| e == "safetensors") {
+            pocket_model
+                .get_voice_state_from_prompt_file(&voice_path)
+                .map_err(|e| format!("Failed to load voice from {:?}: {:?}", voice_path, e))?
+        } else {
+            pocket_model
+                .get_voice_state(&voice_path)
+                .map_err(|e| format!("Failed to load voice from {:?}: {:?}", voice_path, e))?
+        };
 
         Ok(Self {
             whisper_ctx: Arc::new(whisper_ctx),
-            kokoro: Arc::new(kokoro),
-            tts_voice_name: config.app.tts_voice_name.clone(),
+            pocket_model: Arc::new(pocket_model),
+            voice_state: Arc::new(voice_state),
         })
     }
 
@@ -447,13 +470,16 @@ impl SpeechToText for AudioManager {
 #[async_trait::async_trait]
 impl TextToSpeech for AudioManager {
     async fn speak(&self, text: &str) -> Result<Vec<f32>, String> {
-        let text_owned = text.to_string();
+        let audio_tensor = self
+            .pocket_model
+            .generate(text, &self.voice_state)
+            .map_err(|e| format!("Pocket TTS error: {:?}", e))?;
 
-        let (audio_data, _duration) = self
-            .kokoro
-            .synth(text_owned, &self.tts_voice_name)
-            .await
-            .map_err(|e| format!("Kokoro TTS error: {:?}", e))?;
+        let audio_data: Vec<f32> = audio_tensor
+            .squeeze(0)
+            .map_err(|e| format!("Failed to convert TTS output: {:?}", e))?
+            .to_vec1::<f32>()
+            .map_err(|e| format!("Failed to convert TTS output: {:?}", e))?;
 
         Ok(audio_data)
     }

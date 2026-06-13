@@ -35,18 +35,12 @@ fn default_stt_model_url() -> String {
     "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base.en.bin".to_string()
 }
 
-fn default_tts_model_url() -> String {
-    "https://huggingface.co/onnx-community/Kokoro-82M-v1.0-ONNX/resolve/main/onnx/model.onnx"
-        .to_string()
+fn default_tts_pocket_model_variant() -> String {
+    "b6369a24".to_string()
 }
 
-fn default_tts_voice_url() -> String {
-    "https://huggingface.co/onnx-community/Kokoro-82M-v1.0-ONNX/resolve/main/voices/af_heart.bin"
-        .to_string()
-}
-
-fn default_tts_voice_name() -> String {
-    "af_heart".to_string()
+fn default_tts_voice_path() -> String {
+    String::new()
 }
 
 fn default_llm_url() -> String {
@@ -72,14 +66,11 @@ pub struct AppConfig {
     #[serde(default = "default_stt_model_url")]
     pub stt_model_url: String,
 
-    #[serde(default = "default_tts_model_url")]
-    pub tts_model_url: String,
+    #[serde(default = "default_tts_pocket_model_variant")]
+    pub tts_pocket_model_variant: String,
 
-    #[serde(default = "default_tts_voice_url")]
-    pub tts_voice_url: String,
-
-    #[serde(default = "default_tts_voice_name")]
-    pub tts_voice_name: String,
+    #[serde(default = "default_tts_voice_path")]
+    pub tts_voice_path: String,
 
     #[serde(default = "default_llm_url")]
     pub llm_url: String,
@@ -95,9 +86,8 @@ impl Default for AppConfig {
             wake_word: default_wake_word(),
             wake_word_sensitivity: default_wake_word_sensitivity(),
             stt_model_url: default_stt_model_url(),
-            tts_model_url: default_tts_model_url(),
-            tts_voice_url: default_tts_voice_url(),
-            tts_voice_name: default_tts_voice_name(),
+            tts_pocket_model_variant: default_tts_pocket_model_variant(),
+            tts_voice_path: default_tts_voice_path(),
             llm_url: default_llm_url(),
             search_url_template: default_search_url_template(),
         }
