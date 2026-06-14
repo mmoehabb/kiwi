@@ -169,7 +169,10 @@ impl WebTool {
         }
 
         let first_result = &results[0];
-        let text = self.searcher.fetch_and_extract_text(&first_result.url).await?;
+        let text = self
+            .searcher
+            .fetch_and_extract_text(&first_result.url)
+            .await?;
 
         // Truncate text to avoid exceeding context window (simple approach)
         let max_chars = 4000;

@@ -40,8 +40,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let web_client = Arc::new(WebClient::new(config.clone()));
     let web_tool = WebTool::new(web_client.clone(), llm.clone());
 
-    let perm_manager =
-        PermissionManager::load().unwrap_or_else(|_| PermissionManager::from_file(std::path::Path::new("permissions.toml")).unwrap_or_else(|_| PermissionManager::from_file(std::path::Path::new("does_not_exist.toml")).unwrap()));
+    let perm_manager = PermissionManager::load().unwrap_or_else(|_| {
+        kiwi::permissions::PermissionManager::from_file(std::path::Path::new("/dev/null"))
+            .unwrap_or_else(|_| {
+                let mut p = std::env::temp_dir();
+                p.push("kiwi_empty_perms.toml");
+                std::fs::write(&p, "").unwrap_or_default();
+                kiwi::permissions::PermissionManager::from_file(&p).unwrap()
+            })
+    });
 
     let (gui_event_tx, mut gui_event_rx) = tokio::sync::mpsc::channel(10);
     let gui_event_tx_clone = gui_event_tx.clone();
