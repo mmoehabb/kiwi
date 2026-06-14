@@ -91,10 +91,10 @@ impl eframe::App for KiwiGui {
 
         // Initialize textures on first frame
         if self.idle_texture.is_none() {
-            self.idle_texture = Self::load_texture(ctx, "idle", "assets/idle.png");
-            self.listening_texture = Self::load_texture(ctx, "listening", "assets/listening.png");
-            self.thinking_texture = Self::load_texture(ctx, "thinking", "assets/thinking.png");
-            self.speaking_texture = Self::load_texture(ctx, "speaking", "assets/speaking.png");
+            self.idle_texture = Self::load_texture(ctx, "idle", "assets/idle.webp");
+            self.listening_texture = Self::load_texture(ctx, "listening", "assets/listening.webp");
+            self.thinking_texture = Self::load_texture(ctx, "thinking", "assets/thinking.webp");
+            self.speaking_texture = Self::load_texture(ctx, "speaking", "assets/speaking.webp");
         }
 
         // Position window in the bottom-right corner of the monitor once
