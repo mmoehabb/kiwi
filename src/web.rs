@@ -22,6 +22,7 @@ pub struct SearchResult {
 }
 
 use crate::config::Configuration;
+use crate::llm::LlmEngine;
 use reqwest::Client;
 use scraper::{Html, Selector};
 use std::sync::Arc;
@@ -145,5 +146,41 @@ impl WebSearcher for WebClient {
         } else {
             Err("No body element found in HTML".to_string())
         }
+    }
+}
+
+pub struct WebTool {
+    searcher: Arc<dyn WebSearcher + Send + Sync>,
+    llm: Arc<dyn LlmEngine + Send + Sync>,
+}
+
+impl WebTool {
+    pub fn new(
+        searcher: Arc<dyn WebSearcher + Send + Sync>,
+        llm: Arc<dyn LlmEngine + Send + Sync>,
+    ) -> Self {
+        Self { searcher, llm }
+    }
+
+    pub async fn search_and_recap(&self, query: &str) -> Result<String, String> {
+        let results = self.searcher.search(query).await?;
+        if results.is_empty() {
+            return Err("No search results found.".to_string());
+        }
+
+        let first_result = &results[0];
+        let text = self.searcher.fetch_and_extract_text(&first_result.url).await?;
+
+        // Truncate text to avoid exceeding context window (simple approach)
+        let max_chars = 4000;
+        let truncated_text: String = text.chars().take(max_chars).collect();
+
+        let prompt = format!(
+            "Based on the following extracted text from a web search, answer the query: '{}'.\n\nText:\n{}\n\nRecap:",
+            query, truncated_text
+        );
+
+        let recap = self.llm.generate(&prompt).await?;
+        Ok(recap)
     }
 }
