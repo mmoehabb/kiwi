@@ -141,7 +141,7 @@ impl eframe::App for KiwiGui {
         };
 
         if let Some(tex) = texture {
-            ui.add(egui::Image::new(tex));
+            ui.add(egui::Image::new(tex).shrink_to_fit());
         } else {
             // Fallback text if images fail to load
             ui.heading("Kiwi 🦜");
