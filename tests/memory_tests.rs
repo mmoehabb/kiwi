@@ -8,11 +8,12 @@ async fn test_memory_bank_persistence() {
     bank.add_message(Message {
         role: "user".to_string(),
         content: "Hello!".to_string(),
+        keywords: Some("greeting, hello".to_string()),
     })
     .await
     .unwrap();
 
-    let prompt = bank.build_prompt();
+    let prompt = bank.build_prompt(&["greeting".to_string()]);
     assert!(prompt.contains("Hello!"));
     assert!(prompt.contains("system")); // system prompt should be included
     assert!(prompt.contains("user"));

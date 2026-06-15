@@ -8,6 +8,7 @@ pub trait LlmEngine {
     async fn load_model(&mut self, model_path: &str, tokenizer_path: &str) -> Result<(), String>;
     async fn generate(&self, prompt: &str) -> Result<String, String>;
     async fn generate_structured(&self, prompt: &str) -> Result<String, String>;
+    async fn extract_keywords(&self, text: &str) -> Result<Vec<String>, String>;
 }
 
 pub struct LocalLlm {
@@ -87,6 +88,44 @@ impl LlmEngine for LocalLlm {
 
     async fn generate_structured(&self, prompt: &str) -> Result<String, String> {
         self.internal_generate(prompt, true).await
+    }
+
+    async fn extract_keywords(&self, text: &str) -> Result<Vec<String>, String> {
+        let prompt = format!(
+            "Analyze the following text and extract at least 3 relevant keywords. \
+            Output ONLY valid JSON. Do not include any markdown formatting or extra text.\n\n\
+            Format: {{\"keywords\": \"keyword1, keyword2, keyword3\"}}\n\n\
+            Text: \"{}\"\n\
+            Output:",
+            text
+        );
+
+        let json_response = self.generate_structured(&prompt).await?;
+
+        #[derive(Deserialize)]
+        struct KeywordResponse {
+            keywords: String,
+        }
+
+        match serde_json::from_str::<KeywordResponse>(&json_response) {
+            Ok(resp) => {
+                let keywords: Vec<String> = resp
+                    .keywords
+                    .split(',')
+                    .map(|s| s.trim().to_string())
+                    .collect();
+                Ok(keywords)
+            }
+            Err(_) => {
+                // Fallback to basic word splitting if LLM fails
+                let words: Vec<String> = text
+                    .split_whitespace()
+                    .take(3)
+                    .map(|s| s.to_string())
+                    .collect();
+                Ok(words)
+            }
+        }
     }
 }
 
