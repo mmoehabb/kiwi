@@ -150,7 +150,11 @@ impl ContextManager for MemoryBank {
         // {{ user_message }}<|eot_id|><|start_header_id|>assistant<|end_header_id|>
 
         let mut prompt = String::from("<|begin_of_text|>");
-        for msg in &self.history {
+
+        let history_len = self.history.len();
+        for (i, msg) in self.history.iter().enumerate() {
+            let is_last_five = i >= history_len.saturating_sub(5);
+
             // Always include the root system prompt, not web data
             if msg.content == Self::SYSTEM_PROMPT {
                 prompt.push_str(&format!(
@@ -160,24 +164,24 @@ impl ContextManager for MemoryBank {
                 continue;
             }
 
-            // Check if keywords match
-            let mut is_relevant = false;
-            if let Some(msg_keywords_str) = &msg.keywords {
-                let msg_keywords: Vec<&str> =
-                    msg_keywords_str.split(',').map(|s| s.trim()).collect();
-                for rk in relevant_keywords {
-                    if msg_keywords.contains(&rk.trim()) {
+            let mut is_relevant = is_last_five;
+
+            // Check if keywords match, needing at least 2 matches if it's older
+            if !is_relevant {
+                #[allow(clippy::collapsible_if)]
+                if let Some(msg_keywords_str) = &msg.keywords {
+                    let msg_keywords: Vec<&str> =
+                        msg_keywords_str.split(',').map(|s| s.trim()).collect();
+                    let mut match_count = 0;
+                    for rk in relevant_keywords {
+                        if msg_keywords.contains(&rk.trim()) {
+                            match_count += 1;
+                        }
+                    }
+                    if match_count >= 2 {
                         is_relevant = true;
-                        break;
                     }
                 }
-            } else {
-                // If the message doesn't have keywords, perhaps include it anyway,
-                // but since the new requirement says we only store specific memories and web data,
-                // we probably want to include it only if we're not strict or if it's recent?
-                // The task says we only use *related* data. Since user wants it strict:
-                is_relevant = relevant_keywords.is_empty(); // if no relevant keywords asked, maybe we skip or include?
-                // Let's only include if there are matching keywords or if it's just a general query and no keywords.
             }
 
             if is_relevant {

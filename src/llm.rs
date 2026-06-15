@@ -92,9 +92,9 @@ impl LlmEngine for LocalLlm {
 
     async fn extract_keywords(&self, text: &str) -> Result<Vec<String>, String> {
         let prompt = format!(
-            "Analyze the following text and extract 2-3 relevant keywords. \
+            "Analyze the following text and extract at least 3 relevant keywords. \
             Output ONLY valid JSON. Do not include any markdown formatting or extra text.\n\n\
-            Format: {{\"keywords\": \"keyword1, keyword2\"}}\n\n\
+            Format: {{\"keywords\": \"keyword1, keyword2, keyword3\"}}\n\n\
             Text: \"{}\"\n\
             Output:",
             text

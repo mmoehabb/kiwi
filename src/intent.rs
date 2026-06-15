@@ -37,7 +37,7 @@ impl<'a> IntentRouter for LlmIntentRouter<'a> {
             1. Chat: Normal conversation.\n\
             2. SearchRequired: The user is asking for current events, real-time information, or facts that require searching the web. Include a 'query' field with the search terms.\n\
             3. ExecuteCommand: The user is asking to run a system command or plugin. Include a 'command' field with the command to run.\n\
-            4. StoreMemory: The user is explicitly asking to remember or store something. Include a 'content' field with the raw information to store, and a 'keywords' field containing 2-3 relevant comma-separated keywords for future retrieval.\n\n\
+            4. StoreMemory: The user is explicitly asking to remember or store something. Include a 'content' field with the raw information to store, and a 'keywords' field containing at least 3 relevant comma-separated keywords for future retrieval.\n\n\
             Examples:\n\
             Input: \"Hello!\"\n\
             Output: {{\"type\": \"Chat\"}}\n\
