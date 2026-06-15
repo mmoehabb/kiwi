@@ -54,7 +54,7 @@ fn default_llm_url() -> String {
 }
 
 fn default_search_url_template() -> String {
-    "https://www.google.com/search?q={}".to_string()
+    "https://html.duckduckgo.com/html/?q={}".to_string()
 }
 
 /// The overall configuration for the application.
