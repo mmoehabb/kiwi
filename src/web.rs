@@ -177,6 +177,20 @@ impl WebTool {
             url_to_fetch = format!("https:{}", url_to_fetch);
         }
 
+        // DuckDuckGo often returns redirect URLs in the format `//duckduckgo.com/l/?uddg=<actual_url>`.
+        // We need to extract the actual target URL to fetch the real content.
+        #[allow(clippy::collapsible_if)]
+        if let Ok(parsed_url) = url::Url::parse(&url_to_fetch) {
+            if parsed_url.host_str() == Some("duckduckgo.com") && parsed_url.path() == "/l/" {
+                for (key, value) in parsed_url.query_pairs() {
+                    if key == "uddg" {
+                        url_to_fetch = value.to_string();
+                        break;
+                    }
+                }
+            }
+        }
+
         let extracted_text = match self.searcher.fetch_and_extract_text(&url_to_fetch).await {
             Ok(text) if !text.trim().is_empty() => text,
             // Fallback to the snippet if fetching the page fails
