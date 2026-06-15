@@ -150,29 +150,40 @@ impl WebSearcher for WebClient {
 }
 
 pub struct WebTool {
-    searcher: Arc<dyn WebSearcher + Send + Sync>,
+    _searcher: Arc<dyn WebSearcher + Send + Sync>,
     llm: Arc<dyn LlmEngine + Send + Sync>,
 }
 
 impl WebTool {
     pub fn new(
-        searcher: Arc<dyn WebSearcher + Send + Sync>,
+        _searcher: Arc<dyn WebSearcher + Send + Sync>,
         llm: Arc<dyn LlmEngine + Send + Sync>,
     ) -> Self {
-        Self { searcher, llm }
+        Self { _searcher, llm }
     }
 
     pub async fn search_and_recap(&self, query: &str) -> Result<String, String> {
-        let results = self.searcher.search(query).await?;
-        if results.is_empty() {
-            return Err("No search results found.".to_string());
-        }
+        let url = format!(
+            "https://html.duckduckgo.com/html/?q={}",
+            urlencoding::encode(query)
+        );
 
-        let first_result = &results[0];
-        let text = self
-            .searcher
-            .fetch_and_extract_text(&first_result.url)
-            .await?;
+        let output = tokio::process::Command::new("w3m")
+            .arg("-dump")
+            .arg(&url)
+            .output()
+            .await;
+
+        let text =
+            match output {
+                Ok(output) if output.status.success() => {
+                    String::from_utf8_lossy(&output.stdout).to_string()
+                }
+                _ => return Err(
+                    "Cannot execute web search because w3m is not installed or failed to execute."
+                        .to_string(),
+                ),
+            };
 
         // Truncate text to avoid exceeding context window (simple approach)
         let max_chars = 4000;

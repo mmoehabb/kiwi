@@ -282,6 +282,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                                     }
                                     Err(e) => {
                                         eprintln!("Web search error: {}", e);
+                                        let _ = memory_bank
+                                            .add_message(Message {
+                                                role: "system".to_string(),
+                                                content: format!(
+                                                    "System error during web search: {}",
+                                                    e
+                                                ),
+                                            })
+                                            .await;
                                     }
                                 }
                                 let _ = memory_bank
@@ -442,6 +451,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                                                                         }
                                                                         Err(e) => {
                                                                             eprintln!("Web search error: {}", e);
+                                                                            let _ = memory_bank
+                                                                                .add_message(Message {
+                                                                                    role: "system".to_string(),
+                                                                                    content: format!("System error during web search: {}", e),
+                                                                                })
+                                                                                .await;
                                                                         }
                                                                     }
                                                                     let _ = memory_bank
