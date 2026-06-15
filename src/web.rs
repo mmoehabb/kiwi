@@ -150,48 +150,46 @@ impl WebSearcher for WebClient {
 }
 
 pub struct WebTool {
-    _searcher: Arc<dyn WebSearcher + Send + Sync>,
+    searcher: Arc<dyn WebSearcher + Send + Sync>,
     llm: Arc<dyn LlmEngine + Send + Sync>,
 }
 
 impl WebTool {
     pub fn new(
-        _searcher: Arc<dyn WebSearcher + Send + Sync>,
+        searcher: Arc<dyn WebSearcher + Send + Sync>,
         llm: Arc<dyn LlmEngine + Send + Sync>,
     ) -> Self {
-        Self { _searcher, llm }
+        Self { searcher, llm }
     }
 
     pub async fn search_and_recap(&self, query: &str) -> Result<String, String> {
-        let url = format!(
-            "https://www.google.com/search?q={}",
-            urlencoding::encode(query)
-        );
+        let results = self.searcher.search(query).await?;
 
-        let output = tokio::process::Command::new("w3m")
-            .arg("-dump")
-            .arg(&url)
-            .output()
-            .await;
+        if results.is_empty() {
+            return Err(format!("No search results found for query: {}", query));
+        }
 
-        let text =
-            match output {
-                Ok(output) if output.status.success() => {
-                    String::from_utf8_lossy(&output.stdout).to_string()
-                }
-                _ => return Err(
-                    "Cannot execute web search because w3m is not installed or failed to execute."
-                        .to_string(),
-                ),
-            };
+        let first_result = &results[0];
+
+        // Try to fetch the full content of the first result's URL
+        let mut url_to_fetch = first_result.url.clone();
+        if url_to_fetch.starts_with("//") {
+            url_to_fetch = format!("https:{}", url_to_fetch);
+        }
+
+        let extracted_text = match self.searcher.fetch_and_extract_text(&url_to_fetch).await {
+            Ok(text) if !text.trim().is_empty() => text,
+            // Fallback to the snippet if fetching the page fails
+            _ => first_result.snippet.clone(),
+        };
 
         // Truncate text to avoid exceeding context window (simple approach)
         let max_chars = 4000;
-        let truncated_text: String = text.chars().take(max_chars).collect();
+        let truncated_text: String = extracted_text.chars().take(max_chars).collect();
 
         let prompt = format!(
-            "Based on the following extracted text from a web search, answer the query: '{}'.\n\nText:\n{}\n\nRecap:",
-            query, truncated_text
+            "Based on the following extracted text from a web search, answer the query: '{}'.\n\nSource Title: {}\nSource URL: {}\n\nText:\n{}\n\nRecap:",
+            query, first_result.title, url_to_fetch, truncated_text
         );
 
         let recap = self.llm.generate(&prompt).await?;
