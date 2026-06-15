@@ -260,16 +260,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
                         match intent {
                             Intent::Chat => {
-                                let _ = memory_bank
-                                    .add_message(Message {
-                                        role: "user".to_string(),
-                                        content: text.clone(),
-                                    })
-                                    .await;
+                                // We no longer store standard conversational back-and-forth
                             }
                             Intent::SearchRequired { query } => {
                                 match web_tool.search_and_recap(&query).await {
                                     Ok(recap) => {
+                                        let keywords = llm_clone
+                                            .extract_keywords(&query)
+                                            .await
+                                            .unwrap_or_default()
+                                            .join(", ");
                                         let _ = memory_bank
                                             .add_message(Message {
                                                 role: "system".to_string(),
@@ -277,6 +277,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                                                     "latest data fetched from the web about '{}': {}",
                                                     query, recap
                                                 ),
+                                                keywords: Some(keywords),
                                             })
                                             .await;
                                     }
@@ -289,16 +290,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                                                     "System error during web search: {}",
                                                     e
                                                 ),
+                                                keywords: None,
                                             })
                                             .await;
                                     }
                                 }
-                                let _ = memory_bank
-                                    .add_message(Message {
-                                        role: "user".to_string(),
-                                        content: text.clone(),
-                                    })
-                                    .await;
                             }
                             Intent::ExecuteCommand { command } => {
                                 match perm_manager.execute(&command) {
@@ -310,6 +306,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                                                     "Successfully executed command: {}",
                                                     command
                                                 ),
+                                                keywords: None,
                                             })
                                             .await;
                                     }
@@ -321,32 +318,48 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                                                     "Failed to execute command '{}': {}",
                                                     command, e
                                                 ),
+                                                keywords: None,
                                             })
                                             .await;
                                     }
                                 }
+                            }
+                            Intent::StoreMemory { content, keywords } => {
                                 let _ = memory_bank
                                     .add_message(Message {
                                         role: "user".to_string(),
-                                        content: text.clone(),
+                                        content,
+                                        keywords: Some(keywords),
                                     })
                                     .await;
                             }
                         }
 
-                        let prompt = memory_bank.build_prompt();
+                        // Extract keywords from the current text to find relevant memories
+                        let current_keywords =
+                            llm_clone.extract_keywords(&text).await.unwrap_or_default();
+
+                        let mut prompt = memory_bank.build_prompt(&current_keywords);
+
+                        // Because build_prompt ends with the assistant header, we should inject the user message before it.
+                        if prompt.ends_with("<|start_header_id|>assistant<|end_header_id|>\n\n") {
+                            prompt.truncate(
+                                prompt.len()
+                                    - "<|start_header_id|>assistant<|end_header_id|>\n\n".len(),
+                            );
+                        }
+
+                        // Since we don't store standard chat, we must append the current user message to the prompt directly
+                        prompt.push_str(&format!(
+                            "<|start_header_id|>user<|end_header_id|>\n\n{}<|eot_id|><|start_header_id|>assistant<|end_header_id|>\n\n",
+                            text
+                        ));
+
                         let response = match llm_clone.generate(&prompt).await {
                             Ok(res) => res,
                             Err(e) => format!("Error generating response: {}", e),
                         };
                         println!("Response: {}", response);
-
-                        let _ = memory_bank
-                            .add_message(Message {
-                                role: "assistant".to_string(),
-                                content: response.clone(),
-                            })
-                            .await;
 
                         let mut current_response = response;
 
@@ -429,16 +442,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
                                                             match intent {
                                                                 Intent::Chat => {
-                                                                    let _ = memory_bank
-                                                                        .add_message(Message {
-                                                                            role: "user".to_string(),
-                                                                            content: interruption_text.clone(),
-                                                                        })
-                                                                        .await;
+                                                                    // We no longer store standard conversational back-and-forth
                                                                 }
                                                                 Intent::SearchRequired { query } => {
                                                                     match web_tool.search_and_recap(&query).await {
                                                                         Ok(recap) => {
+                                                                            let keywords = llm_clone.extract_keywords(&query).await.unwrap_or_default().join(", ");
                                                                             let _ = memory_bank
                                                                                 .add_message(Message {
                                                                                     role: "system".to_string(),
@@ -446,6 +455,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                                                                                         "latest data fetched from the web about '{}': {}",
                                                                                         query, recap
                                                                                     ),
+                                                                                    keywords: Some(keywords),
                                                                                 })
                                                                                 .await;
                                                                         }
@@ -455,16 +465,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                                                                                 .add_message(Message {
                                                                                     role: "system".to_string(),
                                                                                     content: format!("System error during web search: {}", e),
+                                                                                    keywords: None,
                                                                                 })
                                                                                 .await;
                                                                         }
                                                                     }
-                                                                    let _ = memory_bank
-                                                                        .add_message(Message {
-                                                                            role: "user".to_string(),
-                                                                            content: interruption_text.clone(),
-                                                                        })
-                                                                        .await;
                                                                 }
                                                                 Intent::ExecuteCommand { command } => {
                                                                     match perm_manager.execute(&command) {
@@ -476,6 +481,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                                                                                         "Successfully executed command: {}",
                                                                                         command
                                                                                     ),
+                                                                                    keywords: None,
                                                                                 })
                                                                                 .await;
                                                                         }
@@ -487,32 +493,40 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                                                                                         "Failed to execute command '{}': {}",
                                                                                         command, e
                                                                                     ),
+                                                                                    keywords: None,
                                                                                 })
                                                                                 .await;
                                                                         }
                                                                     }
+                                                                }
+                                                                Intent::StoreMemory { content, keywords } => {
                                                                     let _ = memory_bank
                                                                         .add_message(Message {
                                                                             role: "user".to_string(),
-                                                                            content: interruption_text.clone(),
+                                                                            content,
+                                                                            keywords: Some(keywords),
                                                                         })
                                                                         .await;
                                                                 }
                                                             }
 
-                                                            let prompt = memory_bank.build_prompt();
+                                                            let current_keywords = llm_clone.extract_keywords(&interruption_text).await.unwrap_or_default();
+                                                            let mut prompt = memory_bank.build_prompt(&current_keywords);
+
+                                                            if prompt.ends_with("<|start_header_id|>assistant<|end_header_id|>\n\n") {
+                                                                prompt.truncate(prompt.len() - "<|start_header_id|>assistant<|end_header_id|>\n\n".len());
+                                                            }
+
+                                                            prompt.push_str(&format!(
+                                                                "<|start_header_id|>user<|end_header_id|>\n\n{}<|eot_id|><|start_header_id|>assistant<|end_header_id|>\n\n",
+                                                                interruption_text
+                                                            ));
+
                                                             current_response = match llm_clone.generate(&prompt).await {
                                                                 Ok(res) => res,
                                                                 Err(e) => format!("Error generating response: {}", e),
                                                             };
                                                             println!("Interruption Response: {}", current_response);
-
-                                                            let _ = memory_bank
-                                                                .add_message(Message {
-                                                                    role: "assistant".to_string(),
-                                                                    content: current_response.clone(),
-                                                                })
-                                                                .await;
 
                                                             continue;
                                                         } else {
