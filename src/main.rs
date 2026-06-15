@@ -2,9 +2,13 @@ use kiwi::audio::{AudioManager, SpeechToText, TextToSpeech, WakeWordListener};
 use kiwi::config::Configuration;
 use kiwi::event::KiwiEvent;
 use kiwi::gui::{GuiEvent, KiwiGui, MascotState};
+use kiwi::intent::{Intent, IntentRouter, LlmIntentRouter};
 use kiwi::interruption::InterruptionDetector;
 use kiwi::llm::{LlmEngine, LocalLlm};
+use kiwi::memory::{ContextManager, MemoryBank, Message};
+use kiwi::permissions::PermissionManager;
 use kiwi::wakeword::WakewordEngine;
+use kiwi::web::{WebClient, WebTool};
 use rodio::{OutputStream, Sink};
 use std::sync::Arc;
 use tokio::sync::mpsc;
@@ -28,6 +32,23 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let (event_tx, mut event_rx) = mpsc::channel::<KiwiEvent>(32);
     let (gui_tx, gui_rx) = mpsc::channel::<MascotState>(32);
     let audio_mgr_clone = audio_mgr.clone();
+
+    let mut memory_bank = MemoryBank::new(2048)
+        .await
+        .expect("Failed to initialize memory bank");
+
+    let web_client = Arc::new(WebClient::new(config.clone()));
+    let web_tool = WebTool::new(web_client.clone(), llm.clone());
+
+    let perm_manager = PermissionManager::load().unwrap_or_else(|_| {
+        kiwi::permissions::PermissionManager::from_file(std::path::Path::new("/dev/null"))
+            .unwrap_or_else(|_| {
+                let mut p = std::env::temp_dir();
+                p.push("kiwi_empty_perms.toml");
+                std::fs::write(&p, "").unwrap_or_default();
+                kiwi::permissions::PermissionManager::from_file(&p).unwrap()
+            })
+    });
 
     let (gui_event_tx, mut gui_event_rx) = tokio::sync::mpsc::channel(10);
     let gui_event_tx_clone = gui_event_tx.clone();
@@ -226,11 +247,106 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                             .send(KiwiEvent::TranscribedText(text.clone()))
                             .await;
 
-                        let response = match llm_clone.generate(&text).await {
+                        let intent_router = LlmIntentRouter::new(&*llm_clone);
+                        let intent = match intent_router.route_intent(&text).await {
+                            Ok(i) => i,
+                            Err(e) => {
+                                eprintln!("Intent routing error: {}", e);
+                                Intent::Chat
+                            }
+                        };
+
+                        println!("Intent: {:?}", intent);
+
+                        match intent {
+                            Intent::Chat => {
+                                let _ = memory_bank
+                                    .add_message(Message {
+                                        role: "user".to_string(),
+                                        content: text.clone(),
+                                    })
+                                    .await;
+                            }
+                            Intent::SearchRequired { query } => {
+                                match web_tool.search_and_recap(&query).await {
+                                    Ok(recap) => {
+                                        let _ = memory_bank
+                                            .add_message(Message {
+                                                role: "system".to_string(),
+                                                content: format!(
+                                                    "latest data fetched from the web about '{}': {}",
+                                                    query, recap
+                                                ),
+                                            })
+                                            .await;
+                                    }
+                                    Err(e) => {
+                                        eprintln!("Web search error: {}", e);
+                                        let _ = memory_bank
+                                            .add_message(Message {
+                                                role: "system".to_string(),
+                                                content: format!(
+                                                    "System error during web search: {}",
+                                                    e
+                                                ),
+                                            })
+                                            .await;
+                                    }
+                                }
+                                let _ = memory_bank
+                                    .add_message(Message {
+                                        role: "user".to_string(),
+                                        content: text.clone(),
+                                    })
+                                    .await;
+                            }
+                            Intent::ExecuteCommand { command } => {
+                                match perm_manager.execute(&command) {
+                                    Ok(_) => {
+                                        let _ = memory_bank
+                                            .add_message(Message {
+                                                role: "system".to_string(),
+                                                content: format!(
+                                                    "Successfully executed command: {}",
+                                                    command
+                                                ),
+                                            })
+                                            .await;
+                                    }
+                                    Err(e) => {
+                                        let _ = memory_bank
+                                            .add_message(Message {
+                                                role: "system".to_string(),
+                                                content: format!(
+                                                    "Failed to execute command '{}': {}",
+                                                    command, e
+                                                ),
+                                            })
+                                            .await;
+                                    }
+                                }
+                                let _ = memory_bank
+                                    .add_message(Message {
+                                        role: "user".to_string(),
+                                        content: text.clone(),
+                                    })
+                                    .await;
+                            }
+                        }
+
+                        let prompt = memory_bank.build_prompt();
+                        let response = match llm_clone.generate(&prompt).await {
                             Ok(res) => res,
                             Err(e) => format!("Error generating response: {}", e),
                         };
                         println!("Response: {}", response);
+
+                        let _ = memory_bank
+                            .add_message(Message {
+                                role: "assistant".to_string(),
+                                content: response.clone(),
+                            })
+                            .await;
 
                         let mut current_response = response;
 
@@ -300,11 +416,104 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                                                                 .send(KiwiEvent::TranscribedText(interruption_text.clone()))
                                                                 .await;
 
-                                                            current_response = match llm_clone.generate(&interruption_text).await {
+                                                            let intent_router = LlmIntentRouter::new(&*llm_clone);
+                                                            let intent = match intent_router.route_intent(&interruption_text).await {
+                                                                Ok(i) => i,
+                                                                Err(e) => {
+                                                                    eprintln!("Intent routing error: {}", e);
+                                                                    Intent::Chat
+                                                                }
+                                                            };
+
+                                                            println!("Interruption Intent: {:?}", intent);
+
+                                                            match intent {
+                                                                Intent::Chat => {
+                                                                    let _ = memory_bank
+                                                                        .add_message(Message {
+                                                                            role: "user".to_string(),
+                                                                            content: interruption_text.clone(),
+                                                                        })
+                                                                        .await;
+                                                                }
+                                                                Intent::SearchRequired { query } => {
+                                                                    match web_tool.search_and_recap(&query).await {
+                                                                        Ok(recap) => {
+                                                                            let _ = memory_bank
+                                                                                .add_message(Message {
+                                                                                    role: "system".to_string(),
+                                                                                    content: format!(
+                                                                                        "latest data fetched from the web about '{}': {}",
+                                                                                        query, recap
+                                                                                    ),
+                                                                                })
+                                                                                .await;
+                                                                        }
+                                                                        Err(e) => {
+                                                                            eprintln!("Web search error: {}", e);
+                                                                            let _ = memory_bank
+                                                                                .add_message(Message {
+                                                                                    role: "system".to_string(),
+                                                                                    content: format!("System error during web search: {}", e),
+                                                                                })
+                                                                                .await;
+                                                                        }
+                                                                    }
+                                                                    let _ = memory_bank
+                                                                        .add_message(Message {
+                                                                            role: "user".to_string(),
+                                                                            content: interruption_text.clone(),
+                                                                        })
+                                                                        .await;
+                                                                }
+                                                                Intent::ExecuteCommand { command } => {
+                                                                    match perm_manager.execute(&command) {
+                                                                        Ok(_) => {
+                                                                            let _ = memory_bank
+                                                                                .add_message(Message {
+                                                                                    role: "system".to_string(),
+                                                                                    content: format!(
+                                                                                        "Successfully executed command: {}",
+                                                                                        command
+                                                                                    ),
+                                                                                })
+                                                                                .await;
+                                                                        }
+                                                                        Err(e) => {
+                                                                            let _ = memory_bank
+                                                                                .add_message(Message {
+                                                                                    role: "system".to_string(),
+                                                                                    content: format!(
+                                                                                        "Failed to execute command '{}': {}",
+                                                                                        command, e
+                                                                                    ),
+                                                                                })
+                                                                                .await;
+                                                                        }
+                                                                    }
+                                                                    let _ = memory_bank
+                                                                        .add_message(Message {
+                                                                            role: "user".to_string(),
+                                                                            content: interruption_text.clone(),
+                                                                        })
+                                                                        .await;
+                                                                }
+                                                            }
+
+                                                            let prompt = memory_bank.build_prompt();
+                                                            current_response = match llm_clone.generate(&prompt).await {
                                                                 Ok(res) => res,
                                                                 Err(e) => format!("Error generating response: {}", e),
                                                             };
                                                             println!("Interruption Response: {}", current_response);
+
+                                                            let _ = memory_bank
+                                                                .add_message(Message {
+                                                                    role: "assistant".to_string(),
+                                                                    content: current_response.clone(),
+                                                                })
+                                                                .await;
+
                                                             continue;
                                                         } else {
                                                             break;

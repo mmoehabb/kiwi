@@ -22,6 +22,7 @@ pub struct SearchResult {
 }
 
 use crate::config::Configuration;
+use crate::llm::LlmEngine;
 use reqwest::Client;
 use scraper::{Html, Selector};
 use std::sync::Arc;
@@ -145,5 +146,55 @@ impl WebSearcher for WebClient {
         } else {
             Err("No body element found in HTML".to_string())
         }
+    }
+}
+
+pub struct WebTool {
+    _searcher: Arc<dyn WebSearcher + Send + Sync>,
+    llm: Arc<dyn LlmEngine + Send + Sync>,
+}
+
+impl WebTool {
+    pub fn new(
+        _searcher: Arc<dyn WebSearcher + Send + Sync>,
+        llm: Arc<dyn LlmEngine + Send + Sync>,
+    ) -> Self {
+        Self { _searcher, llm }
+    }
+
+    pub async fn search_and_recap(&self, query: &str) -> Result<String, String> {
+        let url = format!(
+            "https://html.duckduckgo.com/html/?q={}",
+            urlencoding::encode(query)
+        );
+
+        let output = tokio::process::Command::new("w3m")
+            .arg("-dump")
+            .arg(&url)
+            .output()
+            .await;
+
+        let text =
+            match output {
+                Ok(output) if output.status.success() => {
+                    String::from_utf8_lossy(&output.stdout).to_string()
+                }
+                _ => return Err(
+                    "Cannot execute web search because w3m is not installed or failed to execute."
+                        .to_string(),
+                ),
+            };
+
+        // Truncate text to avoid exceeding context window (simple approach)
+        let max_chars = 4000;
+        let truncated_text: String = text.chars().take(max_chars).collect();
+
+        let prompt = format!(
+            "Based on the following extracted text from a web search, answer the query: '{}'.\n\nText:\n{}\n\nRecap:",
+            query, truncated_text
+        );
+
+        let recap = self.llm.generate(&prompt).await?;
+        Ok(recap)
     }
 }
