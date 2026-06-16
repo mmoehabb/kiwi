@@ -352,7 +352,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                                             );
                                             sink.append(buffer);
                                             sink.sleep_until_end();
-                                        }).await.unwrap();
+                                        })
+                                        .await
+                                        .unwrap();
                                     }
                                     Err(e) => eprintln!("TTS Error: {}", e),
                                 }
