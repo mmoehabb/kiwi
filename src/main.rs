@@ -258,6 +258,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
                         println!("Intent: {:?}", intent);
 
+                        let mut web_recap = String::new();
+
                         match intent {
                             Intent::Chat => {
                                 // We no longer store standard conversational back-and-forth
@@ -265,34 +267,60 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                             Intent::SearchRequired { query } => {
                                 match web_tool.search_and_recap(&query).await {
                                     Ok(recap) => {
-                                        let keywords = llm_clone
-                                            .extract_keywords(&query)
-                                            .await
-                                            .unwrap_or_default()
-                                            .join(", ");
-                                        let _ = memory_bank
-                                            .add_message(Message {
-                                                role: "system".to_string(),
-                                                content: format!(
-                                                    "latest data fetched from the web about '{}': {}",
-                                                    query, recap
-                                                ),
-                                                keywords: Some(keywords),
-                                            })
-                                            .await;
+                                        web_recap = format!(
+                                            "System Note: The following is the latest information fetched from the web regarding '{}':\n{}\n\n",
+                                            query, recap
+                                        );
                                     }
                                     Err(e) => {
                                         eprintln!("Web search error: {}", e);
-                                        let _ = memory_bank
-                                            .add_message(Message {
-                                                role: "system".to_string(),
-                                                content: format!(
-                                                    "System error during web search: {}",
+                                        web_recap = format!(
+                                            "System Note: A web search was attempted but failed with error: {}\n\n",
+                                            e
+                                        );
+                                    }
+                                }
+                            }
+                            Intent::Inquiry => {
+                                let ask_prompt = format!(
+                                    "Does the system have the latest information to answer this user query: '{}'? Reply only 'Yes' or 'No'.",
+                                    text
+                                );
+                                let has_latest = llm_clone
+                                    .generate(&ask_prompt)
+                                    .await
+                                    .unwrap_or_default()
+                                    .trim()
+                                    .to_lowercase();
+
+                                if has_latest.contains("no") {
+                                    let query_prompt = format!(
+                                        "Generate a short search query to find information about: '{}'. Output ONLY the query.",
+                                        text
+                                    );
+                                    let search_query = llm_clone
+                                        .generate(&query_prompt)
+                                        .await
+                                        .unwrap_or_default()
+                                        .trim()
+                                        .to_string();
+
+                                    if !search_query.is_empty() {
+                                        match web_tool.search_and_recap(&search_query).await {
+                                            Ok(recap) => {
+                                                web_recap = format!(
+                                                    "System Note: The following is the latest information fetched from the web regarding '{}':\n{}\n\n",
+                                                    search_query, recap
+                                                );
+                                            }
+                                            Err(e) => {
+                                                eprintln!("Web search error: {}", e);
+                                                web_recap = format!(
+                                                    "System Note: A web search was attempted but failed with error: {}\n\n",
                                                     e
-                                                ),
-                                                keywords: None,
-                                            })
-                                            .await;
+                                                );
+                                            }
+                                        }
                                     }
                                 }
                             }
@@ -351,8 +379,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
                         // Since we don't store standard chat, we must append the current user message to the prompt directly
                         prompt.push_str(&format!(
-                            "<|start_header_id|>user<|end_header_id|>\n\n{}<|eot_id|><|start_header_id|>assistant<|end_header_id|>\n\n",
-                            text
+                            "<|start_header_id|>user<|end_header_id|>\n\n{}{}<|eot_id|><|start_header_id|>assistant<|end_header_id|>\n\n",
+                            web_recap, text
                         ));
 
                         let response = match llm_clone.generate(&prompt).await {
@@ -440,6 +468,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
                                                             println!("Interruption Intent: {:?}", intent);
 
+                                                            let mut web_recap = String::new();
+
                                                             match intent {
                                                                 Intent::Chat => {
                                                                     // We no longer store standard conversational back-and-forth
@@ -447,27 +477,44 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                                                                 Intent::SearchRequired { query } => {
                                                                     match web_tool.search_and_recap(&query).await {
                                                                         Ok(recap) => {
-                                                                            let keywords = llm_clone.extract_keywords(&query).await.unwrap_or_default().join(", ");
-                                                                            let _ = memory_bank
-                                                                                .add_message(Message {
-                                                                                    role: "system".to_string(),
-                                                                                    content: format!(
-                                                                                        "latest data fetched from the web about '{}': {}",
-                                                                                        query, recap
-                                                                                    ),
-                                                                                    keywords: Some(keywords),
-                                                                                })
-                                                                                .await;
+                                                                            web_recap = format!(
+                                                                                "System Note: The following is the latest information fetched from the web regarding '{}':\n{}\n\n",
+                                                                                query, recap
+                                                                            );
                                                                         }
                                                                         Err(e) => {
                                                                             eprintln!("Web search error: {}", e);
-                                                                            let _ = memory_bank
-                                                                                .add_message(Message {
-                                                                                    role: "system".to_string(),
-                                                                                    content: format!("System error during web search: {}", e),
-                                                                                    keywords: None,
-                                                                                })
-                                                                                .await;
+                                                                            web_recap = format!("System Note: A web search was attempted but failed with error: {}\n\n", e);
+                                                                        }
+                                                                    }
+                                                                }
+                                                                Intent::Inquiry => {
+                                                                    let ask_prompt = format!(
+                                                                        "Does the system have the latest information to answer this user query: '{}'? Reply only 'Yes' or 'No'.",
+                                                                        interruption_text
+                                                                    );
+                                                                    let has_latest = llm_clone.generate(&ask_prompt).await.unwrap_or_default().trim().to_lowercase();
+
+                                                                    if has_latest.contains("no") {
+                                                                        let query_prompt = format!(
+                                                                            "Generate a short search query to find information about: '{}'. Output ONLY the query.",
+                                                                            interruption_text
+                                                                        );
+                                                                        let search_query = llm_clone.generate(&query_prompt).await.unwrap_or_default().trim().to_string();
+
+                                                                        if !search_query.is_empty() {
+                                                                            match web_tool.search_and_recap(&search_query).await {
+                                                                                Ok(recap) => {
+                                                                                    web_recap = format!(
+                                                                                        "System Note: The following is the latest information fetched from the web regarding '{}':\n{}\n\n",
+                                                                                        search_query, recap
+                                                                                    );
+                                                                                }
+                                                                                Err(e) => {
+                                                                                    eprintln!("Web search error: {}", e);
+                                                                                    web_recap = format!("System Note: A web search was attempted but failed with error: {}\n\n", e);
+                                                                                }
+                                                                            }
                                                                         }
                                                                     }
                                                                 }
@@ -518,8 +565,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                                                             }
 
                                                             prompt.push_str(&format!(
-                                                                "<|start_header_id|>user<|end_header_id|>\n\n{}<|eot_id|><|start_header_id|>assistant<|end_header_id|>\n\n",
-                                                                interruption_text
+                                                                "<|start_header_id|>user<|end_header_id|>\n\n{}{}<|eot_id|><|start_header_id|>assistant<|end_header_id|>\n\n",
+                                                                web_recap, interruption_text
                                                             ));
 
                                                             current_response = match llm_clone.generate(&prompt).await {
