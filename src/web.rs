@@ -80,7 +80,27 @@ impl WebSearcher for WebClient {
 
             if let (Some(t), Some(s)) = (title_el, snippet_el) {
                 let title = t.text().collect::<Vec<_>>().join("");
-                let url = t.value().attr("href").unwrap_or("").to_string();
+                let mut url = t.value().attr("href").unwrap_or("").to_string();
+
+                if url.starts_with("//") {
+                    url = format!("https:{}", url);
+                }
+
+                // DuckDuckGo often returns redirect URLs in the format `//duckduckgo.com/l/?uddg=<actual_url>`.
+                // We need to extract the actual target URL.
+                #[allow(clippy::collapsible_if)]
+                if let Ok(parsed_url) = url::Url::parse(&url) {
+                    if parsed_url.host_str() == Some("duckduckgo.com") && parsed_url.path() == "/l/"
+                    {
+                        for (key, value) in parsed_url.query_pairs() {
+                            if key == "uddg" {
+                                url = value.to_string();
+                                break;
+                            }
+                        }
+                    }
+                }
+
                 let snippet = s.text().collect::<Vec<_>>().join("");
 
                 results.push(SearchResult {
@@ -172,24 +192,7 @@ impl WebTool {
         let first_result = &results[0];
 
         // Try to fetch the full content of the first result's URL
-        let mut url_to_fetch = first_result.url.clone();
-        if url_to_fetch.starts_with("//") {
-            url_to_fetch = format!("https:{}", url_to_fetch);
-        }
-
-        // DuckDuckGo often returns redirect URLs in the format `//duckduckgo.com/l/?uddg=<actual_url>`.
-        // We need to extract the actual target URL to fetch the real content.
-        #[allow(clippy::collapsible_if)]
-        if let Ok(parsed_url) = url::Url::parse(&url_to_fetch) {
-            if parsed_url.host_str() == Some("duckduckgo.com") && parsed_url.path() == "/l/" {
-                for (key, value) in parsed_url.query_pairs() {
-                    if key == "uddg" {
-                        url_to_fetch = value.to_string();
-                        break;
-                    }
-                }
-            }
-        }
+        let url_to_fetch = first_result.url.clone();
 
         let extracted_text = match self.searcher.fetch_and_extract_text(&url_to_fetch).await {
             Ok(text) if !text.trim().is_empty() => text,
