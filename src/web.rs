@@ -4,12 +4,10 @@
 #[async_trait::async_trait]
 pub trait WebSearcher {
     /// Queries a search engine and returns a list of result snippets and URLs.
-    /// TODO: Implement a Google Search API integration or a custom scraper tool.
     async fn search(&self, query: &str) -> Result<Vec<SearchResult>, String>;
 
     /// Fetches the raw HTML of a given URL and extracts the readable text.
     /// Useful for feeding articles or documentation into the LLM context.
-    /// TODO: Implement HTTP client (e.g., reqwest) and HTML parsing (e.g., scraper).
     async fn fetch_and_extract_text(&self, url: &str) -> Result<String, String>;
 }
 
@@ -23,23 +21,18 @@ pub struct SearchResult {
 
 use crate::config::Configuration;
 use crate::llm::LlmEngine;
-use reqwest::Client;
 use scraper::{Html, Selector};
+use std::io::Cursor;
 use std::sync::Arc;
 
-/// The main struct handling outgoing web requests.
+/// The main struct handling outgoing web requests via w3m.
 pub struct WebClient {
-    client: Client,
     config: Arc<Configuration>,
 }
 
 impl WebClient {
     pub fn new(config: Arc<Configuration>) -> Self {
-        let client = Client::builder()
-            .user_agent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36")
-            .build()
-            .unwrap_or_default();
-        Self { client, config }
+        Self { config }
     }
 }
 
@@ -52,101 +45,82 @@ impl WebSearcher for WebClient {
             .search_url_template
             .replace("{}", &urlencoding::encode(query));
 
-        let response = self
-            .client
-            .get(&url)
-            .send()
+        let output = tokio::process::Command::new("w3m")
+            .arg("-dump_source")
+            .arg(&url)
+            .output()
             .await
-            .map_err(|e| format!("Failed to send request: {}", e))?;
+            .map_err(|e| format!("Failed to run w3m: {}", e))?;
 
-        let html_content = response
-            .text()
-            .await
-            .map_err(|e| format!("Failed to read response: {}", e))?;
-
-        let document = Html::parse_document(&html_content);
-        let result_selector =
-            Selector::parse(".result").map_err(|_| "Invalid selector".to_string())?;
-        let title_selector =
-            Selector::parse(".result__a").map_err(|_| "Invalid selector".to_string())?;
-        let snippet_selector =
-            Selector::parse(".result__snippet").map_err(|_| "Invalid selector".to_string())?;
-
-        let mut results = Vec::new();
-
-        for element in document.select(&result_selector) {
-            let title_el = element.select(&title_selector).next();
-            let snippet_el = element.select(&snippet_selector).next();
-
-            if let (Some(t), Some(s)) = (title_el, snippet_el) {
-                let title = t.text().collect::<Vec<_>>().join("");
-                let url = t.value().attr("href").unwrap_or("").to_string();
-                let snippet = s.text().collect::<Vec<_>>().join("");
-
-                results.push(SearchResult {
-                    title,
-                    url,
-                    snippet,
-                });
-            }
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            return Err(format!("w3m exited with error: {}", stderr));
         }
 
-        Ok(results)
+        let html = decompress_brotli(&output.stdout)?;
+        parse_search_results(&html)
     }
 
     async fn fetch_and_extract_text(&self, url: &str) -> Result<String, String> {
-        let response = self
-            .client
-            .get(url)
-            .send()
+        let output = tokio::process::Command::new("w3m")
+            .arg("-dump")
+            .arg(url)
+            .output()
             .await
-            .map_err(|e| format!("Failed to send request: {}", e))?;
+            .map_err(|e| format!("Failed to run w3m: {}", e))?;
 
-        let html_content = response
-            .text()
-            .await
-            .map_err(|e| format!("Failed to read response: {}", e))?;
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            return Err(format!("w3m exited with error: {}", stderr));
+        }
 
-        let document = Html::parse_document(&html_content);
-        let body_selector = Selector::parse("body").map_err(|_| "Invalid selector".to_string())?;
-        let remove_selectors = ["script", "style", "noscript", "iframe", "svg"];
+        let text = String::from_utf8_lossy(&output.stdout).to_string();
+        Ok(text.split_whitespace().collect::<Vec<_>>().join(" "))
+    }
+}
 
-        if let Some(body) = document.select(&body_selector).next() {
-            let mut extracted_text = String::new();
-            for node in body.descendants() {
-                if let Some(element) = node.value().as_element() {
-                    let tag_name = element.name();
-                    if remove_selectors.contains(&tag_name) {
-                        continue;
-                    }
-                }
-                if let Some(text_node) = node.value().as_text() {
-                    let mut should_skip = false;
-                    for ancestor in node.ancestors() {
-                        if let Some(el) = ancestor.value().as_element()
-                            && remove_selectors.contains(&el.name())
-                        {
-                            should_skip = true;
-                            break;
-                        }
-                    }
-                    if !should_skip {
-                        extracted_text.push_str(&text_node.text);
-                        extracted_text.push(' ');
-                    }
-                }
-            }
-
-            // basic whitespace compression
-            let compressed_text: String = extracted_text
-                .split_whitespace()
-                .collect::<Vec<_>>()
-                .join(" ");
-            Ok(compressed_text)
-        } else {
-            Err("No body element found in HTML".to_string())
+fn decompress_brotli(data: &[u8]) -> Result<String, String> {
+    let mut reader = Cursor::new(data);
+    let mut decompressed = Vec::new();
+    match brotli::BrotliDecompress(&mut reader, &mut decompressed) {
+        Ok(_) => String::from_utf8(decompressed)
+            .map_err(|e| format!("Brotli output is not valid UTF-8: {}", e)),
+        Err(_) => {
+            // Not brotli-compressed, use raw data
+            String::from_utf8(data.to_vec())
+                .map_err(|e| format!("w3m output is not valid UTF-8: {}", e))
         }
     }
+}
+
+fn parse_search_results(html: &str) -> Result<Vec<SearchResult>, String> {
+    let document = Html::parse_document(html);
+    let result_selector = Selector::parse(".result").map_err(|_| "Invalid selector".to_string())?;
+    let title_selector =
+        Selector::parse(".result__a").map_err(|_| "Invalid selector".to_string())?;
+    let snippet_selector =
+        Selector::parse(".result__snippet").map_err(|_| "Invalid selector".to_string())?;
+
+    let mut results = Vec::new();
+
+    for element in document.select(&result_selector) {
+        let title_el = element.select(&title_selector).next();
+        let snippet_el = element.select(&snippet_selector).next();
+
+        if let (Some(t), Some(s)) = (title_el, snippet_el) {
+            let title = t.text().collect::<Vec<_>>().join("");
+            let url = t.value().attr("href").unwrap_or("").to_string();
+            let snippet = s.text().collect::<Vec<_>>().join("");
+
+            results.push(SearchResult {
+                title,
+                url,
+                snippet,
+            });
+        }
+    }
+
+    Ok(results)
 }
 
 pub struct WebTool {
@@ -179,12 +153,11 @@ impl WebTool {
 
         let extracted_text = match self.searcher.fetch_and_extract_text(&url_to_fetch).await {
             Ok(text) if !text.trim().is_empty() => text,
-            // Fallback to the snippet if fetching the page fails
             _ => first_result.snippet.clone(),
         };
 
         // Truncate text to avoid exceeding context window (simple approach)
-        let max_chars = 4000;
+        let max_chars = 8000;
         let truncated_text: String = extracted_text.chars().take(max_chars).collect();
 
         let prompt = format!(
