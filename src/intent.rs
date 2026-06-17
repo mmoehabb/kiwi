@@ -8,6 +8,7 @@ use crate::llm::LlmEngine;
 pub enum Intent {
     Chat,
     SearchRequired { query: String },
+    Inquiry,
     ExecuteCommand { command: String },
     StoreMemory { content: String, keywords: String },
     Farewell,
@@ -37,14 +38,17 @@ impl<'a> IntentRouter for LlmIntentRouter<'a> {
             Possible intents:\n\
             1. Chat: Normal conversation.\n\
             2. SearchRequired: The user is asking for current events, real-time information, or facts that require searching the web. Include a 'query' field with the search terms.\n\
-            3. ExecuteCommand: The user is asking to run a system command or plugin. Include a 'command' field with the command to run.\n\
-            4. StoreMemory: The user is explicitly asking to remember or store something. Include a 'content' field with the raw information to store, and a 'keywords' field containing at least 3 relevant comma-separated keywords for future retrieval.\n\
-            5. Farewell: The user is saying goodbye, exiting, or ending the conversation.\n\n\
+            3. Inquiry: The user is asking a general question where you might already know the answer, but might need to verify if your knowledge is up to date.\n\
+            4. ExecuteCommand: The user is asking to run a system command or plugin. Include a 'command' field with the command to run.\n\
+            5. StoreMemory: The user is explicitly asking to remember or store something. Include a 'content' field with the raw information to store, and a 'keywords' field containing at least 3 relevant comma-separated keywords for future retrieval.\n\
+            6. Farewell: The user is saying goodbye, exiting, or ending the conversation.\n\n\
             Examples:\n\
             Input: \"Hello!\"\n\
             Output: {{\"type\": \"Chat\"}}\n\
             Input: \"What is the weather in Tokyo?\"\n\
             Output: {{\"type\": \"SearchRequired\", \"query\": \"weather in Tokyo\"}}\n\
+            Input: \"What is the capital of France?\"\n\
+            Output: {{\"type\": \"Inquiry\"}}\n\
             Input: \"Open the calculator\"\n\
             Output: {{\"type\": \"ExecuteCommand\", \"command\": \"open calculator\"}}\n\
             Input: \"Remember that my favorite color is blue\"\n\
@@ -73,6 +77,12 @@ impl<'a> IntentRouter for LlmIntentRouter<'a> {
                     Ok(Intent::SearchRequired {
                         query: transcribed_text.to_string(),
                     })
+                } else if lower_text.contains("what")
+                    || lower_text.contains("how")
+                    || lower_text.contains("who")
+                    || lower_text.contains("where")
+                {
+                    Ok(Intent::Inquiry)
                 } else if lower_text.contains("open")
                     || lower_text.contains("run")
                     || lower_text.contains("execute")
