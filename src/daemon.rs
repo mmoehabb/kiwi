@@ -155,7 +155,79 @@ async fn generate_response(
     web_recap: &str,
 ) -> String {
     let current_keywords = llm_clone.extract_keywords(text).await.unwrap_or_default();
-    let mut prompt = memory_bank.build_prompt(&current_keywords);
+
+    let history_len = memory_bank.history.len();
+    let last_five_start = history_len.saturating_sub(5);
+
+    let mut recent_entries = Vec::new();
+    for (i, msg) in memory_bank.history.iter().enumerate() {
+        if i >= last_five_start && msg.content != MemoryBank::SYSTEM_PROMPT {
+            recent_entries.push(msg.content.clone());
+        }
+    }
+
+    let mut relevant_last_entries = Vec::new();
+
+    if !recent_entries.is_empty() {
+        let mut evaluation_prompt = String::from(
+            "For each of the following messages, determine if it shares the same topic as the current user query.\n\
+             Current user query: \"",
+        );
+        evaluation_prompt.push_str(text);
+        evaluation_prompt.push_str("\"\n\nMessages:\n");
+
+        for (i, entry) in recent_entries.iter().enumerate() {
+            evaluation_prompt.push_str(&format!("{}. \"{}\"\n", i + 1, entry));
+        }
+
+        evaluation_prompt.push_str(
+            "\nReply with a comma-separated list of 'Yes' or 'No' for each message in order. \
+             Example output: Yes, No, Yes",
+        );
+
+        let eval_response = llm_clone
+            .generate(&evaluation_prompt)
+            .await
+            .unwrap_or_default();
+
+        let answers: Vec<&str> = eval_response.split(',').map(|s| s.trim()).collect();
+        for answer in answers {
+            let answer_lower = answer.to_lowercase();
+            // remove punctuation
+            let cleaned_answer = answer_lower.trim_matches(|c: char| !c.is_alphabetic());
+            if cleaned_answer == "yes" {
+                relevant_last_entries.push(true);
+            } else {
+                relevant_last_entries.push(false);
+            }
+        }
+
+        // Pad with false if LLM returned too few answers
+        while relevant_last_entries.len() < recent_entries.len() {
+            relevant_last_entries.push(false);
+        }
+        // Truncate if LLM returned too many
+        relevant_last_entries.truncate(recent_entries.len());
+    }
+
+    let mut all_last_entries_relevant = Vec::new();
+    let mut idx = 0;
+    for (i, msg) in memory_bank.history.iter().enumerate() {
+        if i >= last_five_start {
+            if msg.content == MemoryBank::SYSTEM_PROMPT {
+                all_last_entries_relevant.push(true); // Doesn't matter, handled inside build_prompt
+            } else {
+                if idx < relevant_last_entries.len() {
+                    all_last_entries_relevant.push(relevant_last_entries[idx]);
+                    idx += 1;
+                } else {
+                    all_last_entries_relevant.push(false);
+                }
+            }
+        }
+    }
+
+    let mut prompt = memory_bank.build_prompt(&current_keywords, &all_last_entries_relevant);
 
     if prompt.ends_with("<|start_header_id|>assistant<|end_header_id|>\n\n") {
         prompt.truncate(prompt.len() - "<|start_header_id|>assistant<|end_header_id|>\n\n".len());

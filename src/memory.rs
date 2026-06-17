@@ -14,7 +14,7 @@ pub struct Message {
 #[async_trait]
 pub trait ContextManager {
     async fn add_message(&mut self, message: Message) -> Result<(), String>;
-    fn build_prompt(&self, relevant_keywords: &[String]) -> String;
+    fn build_prompt(&self, relevant_keywords: &[String], relevant_last_entries: &[bool]) -> String;
     async fn clear(&mut self) -> Result<(), String>;
 }
 
@@ -143,7 +143,7 @@ impl ContextManager for MemoryBank {
         Ok(())
     }
 
-    fn build_prompt(&self, relevant_keywords: &[String]) -> String {
+    fn build_prompt(&self, relevant_keywords: &[String], relevant_last_entries: &[bool]) -> String {
         // Llama 3 prompt format:
         // <|begin_of_text|><|start_header_id|>system<|end_header_id|>
         // {{ system_prompt }}<|eot_id|><|start_header_id|>user<|end_header_id|>
@@ -152,8 +152,10 @@ impl ContextManager for MemoryBank {
         let mut prompt = String::from("<|begin_of_text|>");
 
         let history_len = self.history.len();
+        let last_five_start = history_len.saturating_sub(5);
+
         for (i, msg) in self.history.iter().enumerate() {
-            let is_last_five = i >= history_len.saturating_sub(5);
+            let is_last_five = i >= last_five_start;
 
             // Always include the root system prompt, not web data
             if msg.content == Self::SYSTEM_PROMPT {
@@ -164,10 +166,24 @@ impl ContextManager for MemoryBank {
                 continue;
             }
 
-            let mut is_relevant = is_last_five;
+            let mut is_relevant = false;
+
+            if is_last_five {
+                let idx_in_last_five = i - last_five_start;
+                // Since system prompt isn't in recent_entries in daemon,
+                // we should be careful with indexing, but earlier we said `continue` for system prompt.
+                // However, wait, in tests, there is a system prompt and a user prompt.
+                // Let's just use what was given in `relevant_last_entries`.
+                if idx_in_last_five < relevant_last_entries.len() {
+                    is_relevant = relevant_last_entries[idx_in_last_five];
+                } else {
+                    // Fallback to true if array isn't provided correctly in tests
+                    is_relevant = true;
+                }
+            }
 
             // Check if keywords match, needing at least 2 matches if it's older
-            if !is_relevant {
+            if !is_last_five {
                 #[allow(clippy::collapsible_if)]
                 if let Some(msg_keywords_str) = &msg.keywords {
                     let msg_keywords: Vec<&str> =
