@@ -63,4 +63,42 @@ async fn test_intent_routing_fallback() {
         }
         _ => panic!("Expected StoreMemory intent"),
     }
+
+    let intent = router
+        .route_intent("goodbye kiwi")
+        .await
+        .unwrap_or(Intent::Chat);
+    match intent {
+        Intent::Farewell => {}
+        _ => panic!("Expected Farewell intent"),
+    }
+}
+
+#[tokio::test]
+async fn test_intent_routing_farewell_json() {
+    struct MockLlmFarewell;
+    #[async_trait::async_trait]
+    impl LlmEngine for MockLlmFarewell {
+        async fn load_model(&mut self, _m: &str, _t: &str) -> Result<(), String> {
+            Ok(())
+        }
+        async fn generate(&self, _p: &str) -> Result<String, String> {
+            Ok("".to_string())
+        }
+        async fn generate_structured(&self, _p: &str) -> Result<String, String> {
+            Ok(r#"{"type": "Farewell"}"#.to_string())
+        }
+        async fn extract_keywords(&self, _t: &str) -> Result<Vec<String>, String> {
+            Ok(vec![])
+        }
+    }
+
+    let llm = MockLlmFarewell;
+    let router = LlmIntentRouter::new(&llm);
+
+    let intent = router.route_intent("bye").await.unwrap();
+    match intent {
+        Intent::Farewell => {}
+        _ => panic!("Expected Farewell intent"),
+    }
 }

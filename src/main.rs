@@ -213,7 +213,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
             let llm_clone = llm_daemon.clone();
 
-            loop {
+            'conversation: loop {
                 let _ = event_tx.send(KiwiEvent::WakeWordDetected).await;
 
                 match audio_mgr_clone.listen_and_transcribe().await {
@@ -360,6 +360,33 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                                         keywords: Some(keywords),
                                     })
                                     .await;
+                            }
+                            Intent::Farewell => {
+                                let bye_response = match llm_clone.generate("bye").await {
+                                    Ok(res) => res,
+                                    Err(e) => format!("Error generating response for bye: {}", e),
+                                };
+
+                                match audio_mgr_clone.speak(&bye_response).await {
+                                    Ok(audio_buffer) => {
+                                        tokio::task::spawn_blocking(move || {
+                                            let (_stream, stream_handle) =
+                                                OutputStream::try_default().unwrap();
+                                            let sink = Sink::try_new(&stream_handle).unwrap();
+                                            let buffer = rodio::buffer::SamplesBuffer::new(
+                                                1,
+                                                24000,
+                                                audio_buffer,
+                                            );
+                                            sink.append(buffer);
+                                            sink.sleep_until_end();
+                                        })
+                                        .await
+                                        .unwrap();
+                                    }
+                                    Err(e) => eprintln!("TTS Error: {}", e),
+                                }
+                                break 'conversation;
                             }
                         }
 
@@ -554,6 +581,26 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                                                                             keywords: Some(keywords),
                                                                         })
                                                                         .await;
+                                                                }
+                                                                Intent::Farewell => {
+                                                                    let bye_response = match llm_clone.generate("bye").await {
+                                                                        Ok(res) => res,
+                                                                        Err(e) => format!("Error generating response for bye: {}", e),
+                                                                    };
+
+                                                                    match audio_mgr_clone.speak(&bye_response).await {
+                                                                        Ok(audio_buffer) => {
+                                                                            tokio::task::spawn_blocking(move || {
+                                                                                let (_stream, stream_handle) = OutputStream::try_default().unwrap();
+                                                                                let sink = Sink::try_new(&stream_handle).unwrap();
+                                                                                let buffer = rodio::buffer::SamplesBuffer::new(1, 24000, audio_buffer);
+                                                                                sink.append(buffer);
+                                                                                sink.sleep_until_end();
+                                                                            }).await.unwrap();
+                                                                        }
+                                                                        Err(e) => eprintln!("TTS Error: {}", e),
+                                                                    }
+                                                                    break 'conversation;
                                                                 }
                                                             }
 
