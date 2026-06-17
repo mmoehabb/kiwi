@@ -45,9 +45,15 @@ impl WebSearcher for WebClient {
             .search_url_template
             .replace("{}", &urlencoding::encode(query));
 
+        let url = url
+            .trim()
+            .trim_matches(|c: char| c == '"' || c == '\'' || c == '`');
+
+        println!("Getting results from: {}", url);
+
         let output = tokio::process::Command::new("w3m")
             .arg("-dump_source")
-            .arg(&url)
+            .arg(url)
             .output()
             .await
             .map_err(|e| format!("Failed to run w3m: {}", e))?;
