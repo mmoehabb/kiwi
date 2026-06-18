@@ -11,10 +11,19 @@ pub trait LlmEngine {
     async fn extract_keywords(&self, text: &str) -> Result<Vec<String>, String>;
 }
 
+#[derive(Serialize)]
+struct OllamaOptions {
+    num_ctx: u32,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    think: Option<bool>,
+}
+
 pub struct LocalLlm {
     model_name: String,
     client: reqwest::Client,
     config: Arc<Configuration>,
+    is_speaker: bool,
+    is_thinker: bool,
 }
 
 #[derive(Serialize)]
@@ -22,6 +31,10 @@ struct OllamaGenerateRequest<'a> {
     model: &'a str,
     prompt: &'a str,
     stream: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    system: Option<&'a str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    options: Option<OllamaOptions>,
     #[serde(skip_serializing_if = "Option::is_none")]
     format: Option<&'a str>,
 }
@@ -41,7 +54,15 @@ impl LocalLlm {
             model_name,
             client: reqwest::Client::new(),
             config,
+            is_speaker: false,
+            is_thinker: false,
         }
+    }
+
+    pub fn with_agent_role(mut self, is_speaker: bool, is_thinker: bool) -> Self {
+        self.is_speaker = is_speaker;
+        self.is_thinker = is_thinker;
+        self
     }
 
     async fn internal_generate(&self, prompt: &str, is_structured: bool) -> Result<String, String> {
@@ -49,10 +70,25 @@ impl LocalLlm {
 
         let format = if is_structured { Some("json") } else { None };
 
+        let system = if self.is_speaker {
+            Some(self.config.app.system_message.as_str())
+        } else {
+            None
+        };
+
+        let think = if self.is_thinker { None } else { Some(false) };
+
+        let options = Some(OllamaOptions {
+            num_ctx: self.config.app.num_ctx,
+            think,
+        });
+
         let request = OllamaGenerateRequest {
             model: &self.model_name,
             prompt,
             stream: false,
+            system,
+            options,
             format,
         };
 
@@ -139,6 +175,8 @@ impl Clone for LocalLlm {
             model_name: self.model_name.clone(),
             client: self.client.clone(),
             config: self.config.clone(),
+            is_speaker: self.is_speaker,
+            is_thinker: self.is_thinker,
         }
     }
 }

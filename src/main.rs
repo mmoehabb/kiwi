@@ -48,26 +48,26 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     }));
 
     // Initialize Agents
-    let speaker_llm = Arc::new(LocalLlm::with_model(
-        config.clone(),
-        config.app.speaker_model.clone(),
-    ));
-    let explorer_llm = Arc::new(LocalLlm::with_model(
-        config.clone(),
-        config.app.explorer_model.clone(),
-    ));
-    let thinker_llm = Arc::new(LocalLlm::with_model(
-        config.clone(),
-        config.app.thinker_model.clone(),
-    ));
-    let supervisor_llm = Arc::new(LocalLlm::with_model(
-        config.clone(),
-        config.app.supervisor_model.clone(),
-    ));
-    let orchestrator_llm = Arc::new(LocalLlm::with_model(
-        config.clone(),
-        config.app.orchestrator_model.clone(),
-    ));
+    let speaker_llm = Arc::new(
+        LocalLlm::with_model(config.clone(), config.app.speaker_model.clone())
+            .with_agent_role(true, false),
+    );
+    let explorer_llm = Arc::new(
+        LocalLlm::with_model(config.clone(), config.app.explorer_model.clone())
+            .with_agent_role(false, false),
+    );
+    let thinker_llm = Arc::new(
+        LocalLlm::with_model(config.clone(), config.app.thinker_model.clone())
+            .with_agent_role(false, true),
+    );
+    let supervisor_llm = Arc::new(
+        LocalLlm::with_model(config.clone(), config.app.supervisor_model.clone())
+            .with_agent_role(false, false),
+    );
+    let orchestrator_llm = Arc::new(
+        LocalLlm::with_model(config.clone(), config.app.orchestrator_model.clone())
+            .with_agent_role(false, false),
+    );
 
     let speaker = Speaker::new(speaker_llm);
 
