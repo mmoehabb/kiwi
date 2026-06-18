@@ -98,11 +98,18 @@ impl Thinker {
         response.contains("yes")
     }
 
-    pub async fn generate_search_query(&self, text: &str) -> String {
-        let query_prompt = format!(
-            "Generate a short search query to find information about: '{}'. Output ONLY the query.",
-            text
-        );
+    pub async fn generate_search_query(&self, text: &str, context: &str) -> String {
+        let query_prompt = if context.trim().is_empty() {
+            format!(
+                "Generate a short search query to find information about: '{}'. Output ONLY the query.",
+                text
+            )
+        } else {
+            format!(
+                "Based on the following conversation context:\n{}\n\nGenerate a short search query to find information about the user's latest input: '{}'. Output ONLY the query.",
+                context, text
+            )
+        };
         self.llm
             .generate(&query_prompt)
             .await

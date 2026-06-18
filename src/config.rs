@@ -184,12 +184,13 @@ impl Configuration {
                 .map_err(|e| format!("Failed to read config.toml: {}", e))?;
             self.app = toml::from_str(&content)
                 .map_err(|e| format!("Failed to parse config.toml: {}", e))?;
-        } else {
-            let content = toml::to_string(&self.app)
-                .map_err(|e| format!("Failed to serialize default config: {}", e))?;
-            fs::write(&app_config_path, content)
-                .map_err(|e| format!("Failed to write default config.toml: {}", e))?;
         }
+
+        // Always write back the configuration to ensure all keys are explicitly present
+        let content =
+            toml::to_string(&self.app).map_err(|e| format!("Failed to serialize config: {}", e))?;
+        fs::write(&app_config_path, content)
+            .map_err(|e| format!("Failed to write config.toml: {}", e))?;
 
         // Load PermissionsConfig
         let permissions_path = dir.join("permissions.toml");
@@ -198,12 +199,13 @@ impl Configuration {
                 .map_err(|e| format!("Failed to read permissions.toml: {}", e))?;
             self.permissions = toml::from_str(&content)
                 .map_err(|e| format!("Failed to parse permissions.toml: {}", e))?;
-        } else {
-            let content = toml::to_string(&self.permissions)
-                .map_err(|e| format!("Failed to serialize default permissions: {}", e))?;
-            fs::write(&permissions_path, content)
-                .map_err(|e| format!("Failed to write default permissions.toml: {}", e))?;
         }
+
+        // Always write back the permissions to ensure all keys are explicitly present
+        let content = toml::to_string(&self.permissions)
+            .map_err(|e| format!("Failed to serialize permissions: {}", e))?;
+        fs::write(&permissions_path, content)
+            .map_err(|e| format!("Failed to write permissions.toml: {}", e))?;
 
         Ok(())
     }
