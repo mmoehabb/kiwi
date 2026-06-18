@@ -1,3 +1,4 @@
+use kiwi::agents::{Explorer, Orchestrator, Speaker, Supervisor, Thinker};
 use kiwi::audio::AudioManager;
 use kiwi::config::Configuration;
 use kiwi::daemon::run_background_daemon;
@@ -37,10 +38,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .await
         .expect("Failed to initialize memory bank");
 
-    let web_client = Arc::new(WebClient::new(config.clone()));
-    let web_tool = WebTool::new(web_client.clone(), llm.clone());
-
-    let perm_manager = PermissionManager::load().unwrap_or_else(|_| {
+    let perm_manager = Arc::new(PermissionManager::load().unwrap_or_else(|_| {
         kiwi::permissions::PermissionManager::from_file(std::path::Path::new("/dev/null"))
             .unwrap_or_else(|_| {
                 let mut p = std::env::temp_dir();
@@ -48,7 +46,51 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 std::fs::write(&p, "").unwrap_or_default();
                 kiwi::permissions::PermissionManager::from_file(&p).unwrap()
             })
-    });
+    }));
+
+    // Initialize Agents
+    let speaker_llm = Arc::new(LocalLlm::with_model(
+        config.clone(),
+        config.app.speaker_model.clone(),
+    ));
+    let explorer_llm = Arc::new(LocalLlm::with_model(
+        config.clone(),
+        config.app.explorer_model.clone(),
+    ));
+    let thinker_llm = Arc::new(LocalLlm::with_model(
+        config.clone(),
+        config.app.thinker_model.clone(),
+    ));
+    let supervisor_llm = Arc::new(LocalLlm::with_model(
+        config.clone(),
+        config.app.supervisor_model.clone(),
+    ));
+    let orchestrator_llm = Arc::new(LocalLlm::with_model(
+        config.clone(),
+        config.app.orchestrator_model.clone(),
+    ));
+
+    let speaker = Speaker::new(speaker_llm);
+
+    let web_client = Arc::new(WebClient::new(config.clone()));
+    // Note: The WebTool currently uses a generic LLM. It probably should use the explorer_llm
+    // since the explorer is supposed to be the only agent interacting with the web_tool.
+    let web_tool = Arc::new(WebTool::new(web_client.clone(), explorer_llm.clone()));
+
+    let explorer = Explorer::new(explorer_llm, web_tool);
+
+    let thinker = Thinker::new(thinker_llm);
+
+    let supervisor = Supervisor::new(supervisor_llm, memory_bank);
+
+    let orchestrator = Orchestrator::new(
+        orchestrator_llm,
+        speaker,
+        explorer,
+        thinker,
+        supervisor,
+        perm_manager.clone(),
+    );
 
     let (gui_event_tx, gui_event_rx) = mpsc::channel(10);
     let gui_event_tx_clone = gui_event_tx.clone();
@@ -78,9 +120,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             config_daemon,
             llm_daemon,
             event_tx,
-            web_tool,
-            perm_manager,
-            memory_bank,
+            orchestrator,
         )
         .await;
     });
