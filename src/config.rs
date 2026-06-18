@@ -20,7 +20,7 @@ pub struct PermissionsConfig {
 }
 
 fn default_model_name() -> String {
-    "qwen2.5:1.5b".to_string()
+    "kiwi-v1".to_string()
 }
 
 fn default_wake_word() -> String {

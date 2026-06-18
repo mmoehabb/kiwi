@@ -3,8 +3,6 @@ use crate::audio::{AudioManager, SpeechToText, TextToSpeech, WakeWordListener};
 use crate::config::Configuration;
 use crate::event::KiwiEvent;
 use crate::interruption::InterruptionDetector;
-use crate::llm::{LlmEngine, LocalLlm};
-
 use crate::wakeword::WakewordEngine;
 
 use rodio::{OutputStream, Sink};
@@ -12,10 +10,13 @@ use std::sync::Arc;
 use tokio::sync::Mutex;
 use tokio::sync::mpsc;
 
-async fn handle_farewell(llm_clone: Arc<LocalLlm>, audio_mgr_clone: Arc<AudioManager>) -> String {
-    let bye_response = match llm_clone.generate("bye").await {
-        Ok(res) => res,
-        Err(e) => format!("Error generating response for bye: {}", e),
+async fn handle_farewell(
+    orchestrator_arc: Arc<Mutex<Orchestrator>>,
+    audio_mgr_clone: Arc<AudioManager>,
+) -> String {
+    let bye_response = {
+        let orch = orchestrator_arc.lock().await;
+        orch.process_farewell().await
     };
 
     match audio_mgr_clone.speak(&bye_response).await {
@@ -128,7 +129,6 @@ pub async fn run_background_daemon(
     audio_mgr_clone: Arc<AudioManager>,
     wakeword_engine_arc_clone: Arc<Mutex<WakewordEngine>>,
     config_daemon: Arc<Configuration>,
-    llm_daemon: Arc<LocalLlm>,
     event_tx: mpsc::Sender<KiwiEvent>,
     orchestrator: Orchestrator,
 ) {
@@ -145,10 +145,10 @@ pub async fn run_background_daemon(
         println!("Wake word detected!");
         let _ = event_tx.send(KiwiEvent::WakeWordDetected).await;
 
-        let wake_word_prompt = config_daemon.app.wake_word.clone();
-        let wake_response = match llm_daemon.generate(&wake_word_prompt).await {
-            Ok(res) => res,
-            Err(e) => panic!("Error generating response for wake word: {}", e),
+        let wake_response = {
+            let orch = orchestrator_arc.lock().await;
+            let wake_word_prompt = config_daemon.app.wake_word.clone();
+            orch.speaker.generate_response(&wake_word_prompt).await
         };
 
         match audio_mgr_clone.speak(&wake_response).await {
@@ -162,8 +162,6 @@ pub async fn run_background_daemon(
             Err(e) => eprintln!("TTS Error for wake prompt: {}", e),
         }
 
-        let llm_clone = llm_daemon.clone();
-
         'conversation: loop {
             let _ = event_tx.send(KiwiEvent::WakeWordDetected).await;
 
@@ -171,7 +169,7 @@ pub async fn run_background_daemon(
                 Ok(text) => {
                     if text.is_empty() {
                         println!("Conversation finished.");
-                        handle_farewell(llm_clone.clone(), audio_mgr_clone.clone()).await;
+                        handle_farewell(orchestrator_arc.clone(), audio_mgr_clone.clone()).await;
                         let _ = event_tx.send(KiwiEvent::Idle).await;
                         break 'conversation;
                     }
@@ -187,7 +185,7 @@ pub async fn run_background_daemon(
                     };
 
                     if exit_conv {
-                        handle_farewell(llm_clone.clone(), audio_mgr_clone.clone()).await;
+                        handle_farewell(orchestrator_arc.clone(), audio_mgr_clone.clone()).await;
                         let _ = event_tx.send(KiwiEvent::Idle).await;
                         break 'conversation;
                     }
@@ -202,7 +200,7 @@ pub async fn run_background_daemon(
                     .await;
 
                     if exit_after_playback {
-                        handle_farewell(llm_clone.clone(), audio_mgr_clone.clone()).await;
+                        handle_farewell(orchestrator_arc.clone(), audio_mgr_clone.clone()).await;
                         let _ = event_tx.send(KiwiEvent::Idle).await;
                         break 'conversation;
                     }

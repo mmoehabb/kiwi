@@ -10,7 +10,7 @@ use std::sync::Arc;
 
 pub struct Orchestrator {
     _llm: Arc<LocalLlm>,
-    speaker: Speaker,
+    pub speaker: Speaker,
     explorer: Explorer,
     thinker: Thinker,
     pub supervisor: Supervisor,
@@ -34,6 +34,10 @@ impl Orchestrator {
             supervisor,
             perm_manager,
         }
+    }
+
+    pub async fn process_farewell(&self) -> String {
+        self.speaker.generate_response("bye").await
     }
 
     pub async fn process_input(&mut self, text: &str) -> (String, bool) {

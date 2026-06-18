@@ -24,9 +24,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let wakeword_engine_arc = Arc::new(Mutex::new(wakeword_engine));
 
     println!("Initializing LLM Engine with Ollama...");
-    let mut llm = LocalLlm::new(config.clone());
-    llm.load_model("", "").await?;
-    let llm = Arc::new(llm);
+    let mut _llm = LocalLlm::new(config.clone());
+    _llm.load_model("", "").await?;
 
     let audio_mgr = Arc::new(AudioManager::new(config.clone()).await?);
 
@@ -73,9 +72,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let speaker = Speaker::new(speaker_llm);
 
     let web_client = Arc::new(WebClient::new(config.clone()));
-    // Note: The WebTool currently uses a generic LLM. It probably should use the explorer_llm
-    // since the explorer is supposed to be the only agent interacting with the web_tool.
-    let web_tool = Arc::new(WebTool::new(web_client.clone(), explorer_llm.clone()));
+    let web_tool = Arc::new(WebTool::new(web_client.clone()));
 
     let explorer = Explorer::new(explorer_llm, web_tool);
 
@@ -96,7 +93,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let gui_event_tx_clone = gui_event_tx.clone();
     let wakeword_engine_arc_clone = wakeword_engine_arc.clone();
     let gui_tx_clone = gui_tx.clone();
-    let llm_daemon = llm.clone();
     let config_daemon = config.clone();
 
     tokio::spawn(async move {
@@ -118,7 +114,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             audio_mgr_clone,
             wakeword_engine_arc_clone,
             config_daemon,
-            llm_daemon,
             event_tx,
             orchestrator,
         )
