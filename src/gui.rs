@@ -141,7 +141,14 @@ impl eframe::App for KiwiGui {
         };
 
         if let Some(tex) = texture {
-            ui.add(egui::Image::new(tex).shrink_to_fit());
+            let response = ui.add(
+                egui::Image::new(tex)
+                    .shrink_to_fit()
+                    .sense(egui::Sense::click_and_drag()),
+            );
+            if response.dragged() {
+                ui.ctx().send_viewport_cmd(egui::ViewportCommand::StartDrag);
+            }
         } else {
             // Fallback text if images fail to load
             ui.heading("Kiwi 🦜");

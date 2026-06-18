@@ -140,6 +140,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     });
 
     let options = eframe::NativeOptions {
+        viewport: eframe::egui::ViewportBuilder::default()
+            .with_decorations(false)
+            .with_transparent(true)
+            .with_always_on_top()
+            .with_resizable(false)
+            .with_inner_size([320.0, 320.0]),
         ..Default::default()
     };
 
