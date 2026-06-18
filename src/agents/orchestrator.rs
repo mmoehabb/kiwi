@@ -78,7 +78,25 @@ impl Orchestrator {
                 );
 
                 if !self.thinker.ask_yes_no(&ask_prompt).await {
-                    let search_query = self.thinker.generate_search_query(text).await;
+                    let current_keywords = self.supervisor.extract_keywords(text).await;
+                    let all_last_entries_relevant = self.supervisor.evaluate_relevance(text).await;
+                    let mut context_prompt = self
+                        .supervisor
+                        .memory_bank
+                        .build_prompt(&current_keywords, &all_last_entries_relevant);
+
+                    if context_prompt.ends_with("<|start_header_id|>assistant<|end_header_id|>\n\n")
+                    {
+                        context_prompt.truncate(
+                            context_prompt.len()
+                                - "<|start_header_id|>assistant<|end_header_id|>\n\n".len(),
+                        );
+                    }
+
+                    let search_query = self
+                        .thinker
+                        .generate_search_query(text, &context_prompt)
+                        .await;
 
                     if !search_query.is_empty() {
                         match self.explorer.fetch_info(&search_query).await {
