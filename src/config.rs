@@ -63,6 +63,21 @@ pub struct AppConfig {
     #[serde(default = "default_model_name")]
     pub model_name: String,
 
+    #[serde(default = "default_model_name")]
+    pub orchestrator_model: String,
+
+    #[serde(default = "default_model_name")]
+    pub speaker_model: String,
+
+    #[serde(default = "default_model_name")]
+    pub explorer_model: String,
+
+    #[serde(default = "default_model_name")]
+    pub thinker_model: String,
+
+    #[serde(default = "default_model_name")]
+    pub supervisor_model: String,
+
     #[serde(default = "default_wake_word")]
     pub wake_word: String,
 
@@ -92,6 +107,11 @@ impl Default for AppConfig {
     fn default() -> Self {
         Self {
             model_name: default_model_name(),
+            orchestrator_model: default_model_name(),
+            speaker_model: default_model_name(),
+            explorer_model: default_model_name(),
+            thinker_model: default_model_name(),
+            supervisor_model: default_model_name(),
             wake_word: default_wake_word(),
             wake_word_sensitivity: default_wake_word_sensitivity(),
             stt_model_url: default_stt_model_url(),
