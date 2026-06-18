@@ -1,5 +1,6 @@
 extern crate self as kiwi_core;
 
+pub mod agents;
 pub mod audio;
 pub mod config;
 pub mod daemon;

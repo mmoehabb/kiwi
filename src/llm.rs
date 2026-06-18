@@ -33,8 +33,12 @@ struct OllamaGenerateResponse {
 
 impl LocalLlm {
     pub fn new(config: Arc<Configuration>) -> Self {
+        Self::with_model(config.clone(), config.app.model_name.clone())
+    }
+
+    pub fn with_model(config: Arc<Configuration>, model_name: String) -> Self {
         Self {
-            model_name: config.app.model_name.clone(),
+            model_name,
             client: reqwest::Client::new(),
             config,
         }
