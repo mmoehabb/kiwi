@@ -102,11 +102,12 @@ impl eframe::App for KiwiGui {
             #[allow(clippy::collapsible_if)]
             if let Some(monitor_size) = ctx.input(|i| i.viewport().monitor_size) {
                 let window_size = egui::vec2(320.0, 320.0);
-                let padding = 20.0;
+                let padding_x = 40.0;
+                let padding_y = 20.0;
 
                 let target_pos = egui::pos2(
-                    monitor_size.x - window_size.x - padding,
-                    monitor_size.y - window_size.y - padding,
+                    monitor_size.x - window_size.x - padding_x,
+                    monitor_size.y - window_size.y - padding_y,
                 );
 
                 ctx.send_viewport_cmd(egui::ViewportCommand::OuterPosition(target_pos));
@@ -146,7 +147,7 @@ impl eframe::App for KiwiGui {
                     .shrink_to_fit()
                     .sense(egui::Sense::click_and_drag()),
             );
-            if response.dragged() {
+            if response.drag_started() {
                 ui.ctx().send_viewport_cmd(egui::ViewportCommand::StartDrag);
             }
         } else {
