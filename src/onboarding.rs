@@ -40,8 +40,25 @@ pub async fn run_onboarding(
                                 &conf.clone().into(),
                                 move |data: &[f32], _| {
                                     for frame in data.chunks(channels as usize) {
-                                        let mono_sample =
-                                            frame.iter().sum::<f32>() / channels as f32;
+                                        // TODO: Let the user choose the microphone channel.
+                                        let mono_sample = frame[0];
+                                        let _ = ringbuf::traits::Producer::try_push(
+                                            &mut prod,
+                                            mono_sample,
+                                        );
+                                    }
+                                },
+                                |err| eprintln!("error: {}", err),
+                                None,
+                            )
+                            .unwrap(),
+                        cpal::SampleFormat::I16 => device
+                            .build_input_stream(
+                                &conf.clone().into(),
+                                move |data: &[i16], _| {
+                                    for frame in data.chunks(channels as usize) {
+                                        // TODO: Let the user choose the microphone channel.
+                                        let mono_sample = frame[0] as f32 / i16::MAX as f32;
                                         let _ = ringbuf::traits::Producer::try_push(
                                             &mut prod,
                                             mono_sample,
@@ -66,12 +83,70 @@ pub async fn run_onboarding(
                 .await
                 .unwrap();
                 let processed = if _rate != 16000 {
-                    use dasp::{Signal, interpolate::linear::Linear, signal};
-                    let mut sig = signal::from_iter(audio_data.clone());
-                    let interp = Linear::new(sig.next(), sig.next());
-                    sig.from_hz_to_hz(interp, _rate as f64, 16000.0)
-                        .take((audio_data.len() as f64 * (16000.0 / _rate as f64)) as usize)
-                        .collect()
+                    use rubato::audioadapter_buffers::direct::SequentialSliceOfVecs;
+                    use rubato::{
+                        Async, FixedAsync, Resampler, SincInterpolationParameters,
+                        SincInterpolationType, WindowFunction,
+                    };
+
+                    let params = SincInterpolationParameters {
+                        sinc_len: 256,
+                        f_cutoff: 0.95,
+                        interpolation: SincInterpolationType::Linear,
+                        oversampling_factor: 256,
+                        window: WindowFunction::BlackmanHarris2,
+                    };
+
+                    let chunk_size = 1024;
+                    let mut resampler = Async::<f32>::new_sinc(
+                        16000.0 / _rate as f64,
+                        2.0,
+                        &params,
+                        chunk_size,
+                        1,
+                        FixedAsync::Input,
+                    )
+                    .unwrap();
+
+                    let mut output = Vec::new();
+                    let mut input = audio_data.as_slice();
+                    while !input.is_empty() {
+                        let frames_to_take =
+                            std::cmp::min(input.len(), resampler.input_frames_next());
+                        let (current, next) = input.split_at(frames_to_take);
+                        let current_vec = current.to_vec();
+                        let frames_in = current_vec.len();
+                        let wrapped_vecs = [current_vec];
+                        let adapter =
+                            SequentialSliceOfVecs::new(&wrapped_vecs, 1, frames_in).unwrap();
+
+                        let partial = if next.is_empty() {
+                            Some(frames_in)
+                        } else {
+                            None
+                        };
+                        let indexing = rubato::Indexing {
+                            input_offset: 0,
+                            output_offset: 0,
+                            partial_len: partial,
+                            active_channels_mask: None,
+                        };
+
+                        use rubato::audioadapter_buffers::owned::InterleavedOwned;
+
+                        let frames = resampler.output_frames_next();
+                        let mut buffer_out = InterleavedOwned::<f32>::new(0.0, 1, frames);
+                        let (_, out_len) = resampler
+                            .process_into_buffer(&adapter, &mut buffer_out, Some(&indexing))
+                            .unwrap();
+                        let out = buffer_out;
+                        use rubato::audioadapter::Adapter;
+                        let mut temp = vec![0.0; out_len];
+                        out.copy_from_channel_to_slice(0, 0, &mut temp);
+                        output.extend_from_slice(&temp);
+                        input = next;
+                    }
+                    output
                 } else {
                     audio_data
                 };
