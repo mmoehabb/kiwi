@@ -13,15 +13,10 @@ graph TD
 
     %% Processing Pipeline
     WW -- "'Hey Kiwi' detected" --> STT[Speech-to-Text Engine]
-    STT --> Router{Intent Router}
-
-    %% Context & Tools
-    Router -- "Requires info" --> Search[Google Search & Web Scraper]
-    Search --> Context(Context Window)
-    Router -- "Direct query" --> Context
+    STT --> Orchestrator
 
     %% Core Intelligence (Multi-Agent System)
-    Context --> Orchestrator
+    Orchestrator <--> Context(Context Window)
     Orchestrator <--> Thinker[Thinker: Intent & Logic]
     Orchestrator <--> Explorer[Explorer: Web Search & Recap]
     Orchestrator <--> Supervisor[Supervisor: Memory & Filtering]
@@ -31,6 +26,10 @@ graph TD
     Explorer --> LLM_Expl[Explorer LLM]
     Supervisor --> LLM_Sup[Supervisor LLM]
     SpeakerAgent --> LLM_Speak[Speaker LLM]
+
+    %% Context & Tools
+    Explorer -- "Requires info" --> Search[Google Search & Web Scraper]
+    Search --> Context
 
     %% Execution & Extensibility
     Orchestrator --> Exec{Action Required?}
@@ -49,7 +48,7 @@ graph TD
     %% GUI & Plugins
     WW -. "Triggers" .-> GUI[Graphical Mascot Popup]
     Orchestrator -. "Loads" .-> Plugins[Rhai Plugin Engine]
-    Plugins -. "Extends" .-> Router
+    Plugins -. "Extends" .-> Orchestrator
 ```
 
 ## Key Design Decisions
