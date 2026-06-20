@@ -1,8 +1,12 @@
 use async_trait::async_trait;
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
-use dasp::{Signal, interpolate::linear::Linear, signal};
 use futures_util::StreamExt;
 use kokoro_en::KokoroTts;
+use rubato::audioadapter_buffers::direct::SequentialSliceOfVecs;
+use rubato::{
+    Async, FixedAsync, Resampler, SincInterpolationParameters, SincInterpolationType,
+    WindowFunction,
+};
 
 #[async_trait::async_trait]
 pub trait WakeWordListener {
@@ -171,7 +175,8 @@ impl WakeWordListener for AudioManager {
                         &config.into(),
                         move |data: &[f32], _: &cpal::InputCallbackInfo| {
                             for frame in data.chunks(channels as usize) {
-                                let mono_sample = frame.iter().sum::<f32>() / channels as f32;
+                                // TODO: Let the user choose the microphone channel.
+                                let mono_sample = frame[0];
                                 let _ = ringbuf::traits::Producer::try_push(&mut prod, mono_sample);
                             }
                         },
@@ -186,11 +191,8 @@ impl WakeWordListener for AudioManager {
                         &config.into(),
                         move |data: &[i16], _: &cpal::InputCallbackInfo| {
                             for frame in data.chunks(channels as usize) {
-                                let mono_sample = frame
-                                    .iter()
-                                    .map(|&s| s as f32 / i16::MAX as f32)
-                                    .sum::<f32>()
-                                    / channels as f32;
+                                // TODO: Let the user choose the microphone channel.
+                                let mono_sample = frame[0] as f32 / i16::MAX as f32;
                                 let _ = ringbuf::traits::Producer::try_push(&mut prod, mono_sample);
                             }
                         },
@@ -205,8 +207,34 @@ impl WakeWordListener for AudioManager {
 
             stream.play().map_err(|e| e.to_string())?;
 
+            let mut resampler = if input_sample_rate != target_sample_rate {
+                let params = SincInterpolationParameters {
+                    sinc_len: 256,
+                    f_cutoff: 0.95,
+                    interpolation: SincInterpolationType::Linear,
+                    oversampling_factor: 256,
+                    window: WindowFunction::BlackmanHarris2,
+                };
+                let chunk_size =
+                    (input_sample_rate as f32 * (chunk_duration_ms as f32 / 1000.0)) as usize;
+                Some(
+                    Async::<f32>::new_sinc(
+                        target_sample_rate as f64 / input_sample_rate as f64,
+                        2.0,
+                        &params,
+                        chunk_size,
+                        1,
+                        FixedAsync::Input,
+                    )
+                    .map_err(|e| e.to_string())?,
+                )
+            } else {
+                None
+            };
+
             let window_size = target_sample_rate as usize * 2; // 2 seconds window
             let mut audio_buffer: Vec<f32> = Vec::with_capacity(window_size);
+            let mut resampler_input_buffer = Vec::new();
 
             loop {
                 std::thread::sleep(std::time::Duration::from_millis(chunk_duration_ms as u64));
@@ -220,16 +248,37 @@ impl WakeWordListener for AudioManager {
                     continue;
                 }
 
-                let processed_audio = if input_sample_rate != target_sample_rate {
-                    let mut signal = signal::from_iter(chunk_audio.clone());
-                    let interp = Linear::new(signal.next(), signal.next());
-                    let samples_to_take = (chunk_audio.len() as f64
-                        * (target_sample_rate as f64 / input_sample_rate as f64))
-                        as usize;
-                    signal
-                        .from_hz_to_hz(interp, input_sample_rate as f64, target_sample_rate as f64)
-                        .take(samples_to_take)
-                        .collect::<Vec<f32>>()
+                let processed_audio = if let Some(ref mut r) = resampler {
+                    let mut output = Vec::new();
+                    resampler_input_buffer.extend_from_slice(&chunk_audio);
+
+                    while resampler_input_buffer.len() >= r.input_frames_next() {
+                        let frames_to_take = r.input_frames_next();
+                        let current = &resampler_input_buffer[..frames_to_take];
+                        let current_vec = current.to_vec();
+
+                        let frames_in = current_vec.len();
+                        let wrapped_vecs = [current_vec];
+                        let adapter = SequentialSliceOfVecs::new(&wrapped_vecs, 1, frames_in)
+                            .map_err(|e| e.to_string())?;
+
+                        use rubato::audioadapter_buffers::owned::InterleavedOwned;
+
+                        let frames = r.output_frames_next();
+                        let mut buffer_out = InterleavedOwned::<f32>::new(0.0, 1, frames);
+                        let (_, out_len) = r
+                            .process_into_buffer(&adapter, &mut buffer_out, None)
+                            .map_err(|e: rubato::ResampleError| e.to_string())?;
+                        let out = buffer_out;
+                        use rubato::audioadapter::Adapter;
+                        let mut temp = vec![0.0; out_len];
+                        out.copy_from_channel_to_slice(0, 0, &mut temp);
+                        output.extend_from_slice(&temp);
+
+                        // remove processed frames
+                        resampler_input_buffer.drain(0..frames_to_take);
+                    }
+                    output
                 } else {
                     chunk_audio
                 };
@@ -287,7 +336,8 @@ impl SpeechToText for AudioManager {
                         &config.into(),
                         move |data: &[f32], _: &cpal::InputCallbackInfo| {
                             for frame in data.chunks(channels as usize) {
-                                let mono_sample = frame.iter().sum::<f32>() / channels as f32;
+                                // TODO: Let the user choose the microphone channel.
+                                let mono_sample = frame[0];
                                 let _ = prod.try_push(mono_sample);
                             }
                         },
@@ -302,11 +352,8 @@ impl SpeechToText for AudioManager {
                         &config.into(),
                         move |data: &[i16], _: &cpal::InputCallbackInfo| {
                             for frame in data.chunks(channels as usize) {
-                                let mono_sample = frame
-                                    .iter()
-                                    .map(|&s| s as f32 / i16::MAX as f32)
-                                    .sum::<f32>()
-                                    / channels as f32;
+                                // TODO: Let the user choose the microphone channel.
+                                let mono_sample = frame[0] as f32 / i16::MAX as f32;
                                 let _ = prod.try_push(mono_sample);
                             }
                         },
@@ -392,16 +439,62 @@ impl SpeechToText for AudioManager {
     ) -> Result<String, String> {
         let target_sample_rate = 16000;
         let processed_audio = if input_sample_rate != target_sample_rate {
-            let mut signal = signal::from_iter(audio_data.clone());
-            let interp = Linear::new(signal.next(), signal.next());
-            // Need to know how many samples to take.
-            let samples_to_take = (audio_data.len() as f64
-                * (target_sample_rate as f64 / input_sample_rate as f64))
-                as usize;
-            signal
-                .from_hz_to_hz(interp, input_sample_rate as f64, target_sample_rate as f64)
-                .take(samples_to_take)
-                .collect::<Vec<f32>>()
+            let params = SincInterpolationParameters {
+                sinc_len: 256,
+                f_cutoff: 0.95,
+                interpolation: SincInterpolationType::Linear,
+                oversampling_factor: 256,
+                window: WindowFunction::BlackmanHarris2,
+            };
+            let chunk_size = 1024; // Use a fixed chunk size for processing
+            let mut resampler = Async::<f32>::new_sinc(
+                target_sample_rate as f64 / input_sample_rate as f64,
+                2.0,
+                &params,
+                chunk_size,
+                1,
+                FixedAsync::Input,
+            )
+            .map_err(|e| e.to_string())?;
+
+            let mut output = Vec::new();
+            let mut input = audio_data.as_slice();
+            while !input.is_empty() {
+                let frames_to_take = std::cmp::min(input.len(), resampler.input_frames_next());
+                let (current, next) = input.split_at(frames_to_take);
+                let current_vec = current.to_vec();
+                let frames_in = current_vec.len();
+                let wrapped_vecs = [current_vec];
+                let adapter = SequentialSliceOfVecs::new(&wrapped_vecs, 1, frames_in)
+                    .map_err(|e| e.to_string())?;
+
+                let partial = if next.is_empty() {
+                    Some(frames_in)
+                } else {
+                    None
+                };
+                let indexing = rubato::Indexing {
+                    input_offset: 0,
+                    output_offset: 0,
+                    partial_len: partial,
+                    active_channels_mask: None,
+                };
+
+                use rubato::audioadapter_buffers::owned::InterleavedOwned;
+
+                let frames = resampler.output_frames_next();
+                let mut buffer_out = InterleavedOwned::<f32>::new(0.0, 1, frames);
+                let (_, out_len) = resampler
+                    .process_into_buffer(&adapter, &mut buffer_out, Some(&indexing))
+                    .map_err(|e: rubato::ResampleError| e.to_string())?;
+                let out = buffer_out;
+                use rubato::audioadapter::Adapter;
+                let mut temp = vec![0.0; out_len];
+                out.copy_from_channel_to_slice(0, 0, &mut temp);
+                output.extend_from_slice(&temp);
+                input = next;
+            }
+            output
         } else {
             audio_data
         };
