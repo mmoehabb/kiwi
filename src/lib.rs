@@ -15,3 +15,4 @@ pub mod permissions;
 pub mod plugin;
 pub mod wakeword;
 pub mod web;
+pub mod monitor;

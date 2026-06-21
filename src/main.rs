@@ -10,6 +10,7 @@ use kiwi::onboarding::run_onboarding;
 use kiwi::permissions::PermissionManager;
 use kiwi::wakeword::WakewordEngine;
 use kiwi::web::{WebClient, WebTool};
+use kiwi::monitor::AgentsFlowMonitor;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 use tokio::sync::mpsc;
@@ -80,6 +81,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let supervisor = Supervisor::new(supervisor_llm, memory_bank);
 
+    let monitor = AgentsFlowMonitor::new();
+
     let orchestrator = Orchestrator::new(
         orchestrator_llm,
         speaker,
@@ -87,6 +90,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         thinker,
         supervisor,
         perm_manager.clone(),
+        monitor,
     );
 
     let (gui_event_tx, gui_event_rx) = mpsc::channel(10);
