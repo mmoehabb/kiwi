@@ -10,6 +10,7 @@ pub mod intent;
 pub mod interruption;
 pub mod llm;
 pub mod memory;
+pub mod monitor;
 pub mod onboarding;
 pub mod permissions;
 pub mod plugin;

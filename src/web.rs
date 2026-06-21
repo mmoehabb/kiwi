@@ -38,15 +38,15 @@ impl WebClient {
 #[async_trait::async_trait]
 impl WebSearcher for WebClient {
     async fn search(&self, query: &str) -> Result<Vec<SearchResult>, String> {
+        let query = query
+            .trim()
+            .trim_matches(|c: char| c == '"' || c == '\'' || c == '`');
+
         let url = self
             .config
             .app
             .search_url_template
             .replace("{}", &urlencoding::encode(query));
-
-        let url = url
-            .trim()
-            .trim_matches(|c: char| c == '"' || c == '\'' || c == '`');
 
         println!("Getting results from: {}", url);
 
