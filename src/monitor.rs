@@ -35,7 +35,7 @@ impl AgentsFlowMonitor {
         let mut lines = VecDeque::new();
         if let Ok(file) = fs::File::open(&self.file_path) {
             let reader = BufReader::new(file);
-            for line in reader.lines().flatten() {
+            for line in reader.lines().map_while(Result::ok) {
                 lines.push_back(line);
             }
         }
