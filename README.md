@@ -49,7 +49,7 @@ sudo apt-get update && sudo apt-get install -y libasound2-dev pkg-config cmake c
    cargo build --release
    ```
 
-3. Download the necessary LLM model weights (e.g., GGUF files) and audio models into the `models/` directory. *(Note: Specific model download links will be provided in future releases).*
+3. GGUF and Audio Models will be downloaded automatically when running for the first time.
 
 ### Running Kiwi
 
