@@ -20,7 +20,7 @@ pub struct PermissionsConfig {
 }
 
 fn default_model_name() -> String {
-    "kiwi-v1".to_string()
+    "qwen2.5-1.5b-instruct".to_string()
 }
 
 fn default_wake_word() -> String {
@@ -49,8 +49,8 @@ fn default_tts_voice_name() -> String {
     "af_heart".to_string()
 }
 
-fn default_llm_url() -> String {
-    "http://localhost:11434/api/generate".to_string()
+fn default_llm_model_url() -> String {
+    "https://huggingface.co/Qwen/Qwen2.5-1.5B-Instruct-GGUF/resolve/main/qwen2.5-1.5b-instruct-q4_k_m.gguf".to_string()
 }
 
 fn default_search_url_template() -> String {
@@ -139,8 +139,8 @@ pub struct AppConfig {
     #[serde(default = "default_tts_voice_name")]
     pub tts_voice_name: String,
 
-    #[serde(default = "default_llm_url")]
-    pub llm_url: String,
+    #[serde(default = "default_llm_model_url")]
+    pub llm_model_url: String,
 
     #[serde(default = "default_search_url_template")]
     pub search_url_template: String,
@@ -167,7 +167,7 @@ impl Default for AppConfig {
             tts_model_url: default_tts_model_url(),
             tts_voice_url: default_tts_voice_url(),
             tts_voice_name: default_tts_voice_name(),
-            llm_url: default_llm_url(),
+            llm_model_url: default_llm_model_url(),
             search_url_template: default_search_url_template(),
             num_ctx: default_num_ctx(),
             system_message: default_system_message(),
@@ -213,7 +213,7 @@ impl Configuration {
         Ok(path)
     }
 
-    pub fn wakeword_templates_path() -> Result<PathBuf, String> {
+    pub fn models_dir() -> Result<PathBuf, String> {
         let mut path = dirs::data_local_dir().ok_or("Could not find user local data directory")?;
         path.push("kiwi");
         path.push("models");
@@ -221,6 +221,11 @@ impl Configuration {
             std::fs::create_dir_all(&path)
                 .map_err(|e| format!("Failed to create models dir: {}", e))?;
         }
+        Ok(path)
+    }
+
+    pub fn wakeword_templates_path() -> Result<PathBuf, String> {
+        let mut path = Self::models_dir()?;
         path.push("wakeword_templates.bin");
         Ok(path)
     }

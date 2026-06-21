@@ -23,7 +23,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let wakeword_engine = WakewordEngine::new(wakeword_path, config.app.wake_word_sensitivity);
     let wakeword_engine_arc = Arc::new(Mutex::new(wakeword_engine));
 
-    println!("Initializing LLM Engine with Ollama...");
+    println!("Initializing local LLM Engine...");
     let mut _llm = LocalLlm::new(config.clone());
     _llm.load_model("", "").await?;
 
