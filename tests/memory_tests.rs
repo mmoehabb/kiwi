@@ -2,7 +2,9 @@ use kiwi::memory::{ContextManager, MemoryBank, Message};
 
 #[tokio::test]
 async fn test_memory_bank_persistence() {
-    let mut bank = MemoryBank::new(2048).await.unwrap();
+    let mut bank = MemoryBank::new(2048, "test_memory.sqlite", 50)
+        .await
+        .unwrap();
     bank.clear().await.unwrap();
 
     bank.add_message(Message {

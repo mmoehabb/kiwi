@@ -48,6 +48,14 @@ impl Orchestrator {
         self.monitor.log("User Input", text);
 
         self.monitor.log(
+            "orchestrator to supervisor (context)",
+            &format!("Store user context: {}", text),
+        );
+        self.supervisor
+            .store_context("user", text.to_string())
+            .await;
+
+        self.monitor.log(
             "orchestrator to thinker",
             &format!("What is the intent of '{}'", text),
         );
@@ -233,6 +241,14 @@ impl Orchestrator {
         self.monitor.log("orchestrator to speaker", &prompt);
         let final_response = self.speaker.generate_response(&prompt).await;
         self.monitor.log("Speaker Response", &final_response);
+
+        self.monitor.log(
+            "orchestrator to supervisor (context)",
+            &format!("Store assistant context: {}", final_response),
+        );
+        self.supervisor
+            .store_context("assistant", final_response.clone())
+            .await;
 
         (final_response, exit_conversation)
     }

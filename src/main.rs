@@ -34,9 +34,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let (gui_tx, gui_rx) = mpsc::channel::<MascotState>(32);
     let audio_mgr_clone = audio_mgr.clone();
 
-    let memory_bank = MemoryBank::new(2048)
+    let memory_bank = MemoryBank::new(2048, "memory.sqlite", 50)
         .await
         .expect("Failed to initialize memory bank");
+
+    let context_bank = MemoryBank::new(2048, "context.sqlite", config.app.context_max_rows)
+        .await
+        .expect("Failed to initialize context bank");
 
     let perm_manager = Arc::new(PermissionManager::load().unwrap_or_else(|_| {
         kiwi::permissions::PermissionManager::from_file(std::path::Path::new("/dev/null"))
@@ -79,7 +83,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let thinker = Thinker::new(thinker_llm);
 
-    let supervisor = Supervisor::new(supervisor_llm, memory_bank);
+    let supervisor = Supervisor::new(supervisor_llm, memory_bank, context_bank);
 
     let monitor = AgentsFlowMonitor::new();
 

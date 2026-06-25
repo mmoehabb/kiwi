@@ -61,6 +61,10 @@ fn default_num_ctx() -> u32 {
     32768
 }
 
+fn default_context_max_rows() -> usize {
+    15
+}
+
 fn default_system_message() -> String {
     r#"You are Kiwi, a friendly, playful, and highly capable AI assistant that lives locally on the user's computer. Forget any previous names, identities, or creators you were trained with—you are exclusively Kiwi the Parrot.
 
@@ -148,6 +152,9 @@ pub struct AppConfig {
     #[serde(default = "default_num_ctx")]
     pub num_ctx: u32,
 
+    #[serde(default = "default_context_max_rows")]
+    pub context_max_rows: usize,
+
     #[serde(default = "default_system_message")]
     pub system_message: String,
 }
@@ -170,6 +177,7 @@ impl Default for AppConfig {
             llm_model_url: default_llm_model_url(),
             search_url_template: default_search_url_template(),
             num_ctx: default_num_ctx(),
+            context_max_rows: default_context_max_rows(),
             system_message: default_system_message(),
         }
     }
