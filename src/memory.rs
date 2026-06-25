@@ -15,6 +15,7 @@ pub struct Message {
 pub trait ContextManager {
     async fn add_message(&mut self, message: Message) -> Result<(), String>;
     fn build_prompt(&self, relevant_keywords: &[String], relevant_last_entries: &[bool]) -> String;
+    fn build_prompt_from_bools(&self, is_relevant: &[bool]) -> String;
     async fn clear(&mut self) -> Result<(), String>;
 }
 
@@ -22,13 +23,14 @@ pub trait ContextManager {
 pub struct MemoryBank {
     pub history: VecDeque<Message>,
     pub max_tokens: usize,
+    pub max_rows: usize,
     pub db_pool: SqlitePool,
 }
 
 impl MemoryBank {
     pub const SYSTEM_PROMPT: &'static str = "You are Kiwi, a friendly, playful, and helpful local AI assistant. You take the persona of a stylized, modern parrot. Your voice is conversational, warm, and inviting. You embrace your parrot persona playfully without being annoying. Be concise and brief in your responses. Say 'Squawk!' occasionally or when an error occurs. Protect user privacy and help them effectively.";
 
-    pub async fn new(max_tokens: usize) -> Result<Self, String> {
+    pub async fn new(max_tokens: usize, db_name: &str, max_rows: usize) -> Result<Self, String> {
         // Ensure config directory exists
         let config_dir = dirs::config_dir()
             .unwrap_or_else(|| PathBuf::from("."))
@@ -37,7 +39,7 @@ impl MemoryBank {
             std::fs::create_dir_all(&config_dir).map_err(|e| e.to_string())?;
         }
 
-        let db_path = config_dir.join("memory.sqlite");
+        let db_path = config_dir.join(db_name);
         use sqlx::sqlite::SqliteConnectOptions;
         let options = SqliteConnectOptions::new()
             .filename(&db_path)
@@ -109,6 +111,7 @@ impl MemoryBank {
         Ok(Self {
             history,
             max_tokens,
+            max_rows,
             db_pool: pool,
         })
     }
@@ -129,7 +132,7 @@ impl ContextManager for MemoryBank {
 
         // Basic sliding window based on message count for now
         // A more advanced version would use actual tokenization
-        while self.history.len() > 50 {
+        while self.history.len() > self.max_rows {
             // keep the system prompt
             if let Some(_msg) = self.history.get(1) {
                 // Delete the oldest non-system message
@@ -208,6 +211,23 @@ impl ContextManager for MemoryBank {
             }
         }
         prompt.push_str("<|start_header_id|>assistant<|end_header_id|>\n\n");
+        prompt
+    }
+
+    fn build_prompt_from_bools(&self, is_relevant: &[bool]) -> String {
+        let mut prompt = String::new();
+        for (i, msg) in self.history.iter().enumerate() {
+            let mut relevant = false;
+            if i < is_relevant.len() {
+                relevant = is_relevant[i];
+            }
+            if relevant || msg.content == Self::SYSTEM_PROMPT {
+                prompt.push_str(&format!(
+                    "<|start_header_id|>{}<|end_header_id|>\n\n{}<|eot_id|>",
+                    msg.role, msg.content
+                ));
+            }
+        }
         prompt
     }
 
